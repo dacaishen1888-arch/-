@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
-import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, ColumnSeries, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, addDays, analyzeWindow, calcTargets, dayDiff, entryFromFood, foodFromEntry as foodFromEntryEx, isBaseFoodName, isSameFoodName, isTrain, mergeSearchFoods, movingAverage, r0, shanghaiToday, streakCount, type Body, type Entry, type Food, type Profile } from "./logic";
+import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
+import { MEALS, addDays, analyzeWindow, calcTargets, dayDiff, entryFromFood, foodFromEntry as foodFromEntryEx, isBaseFoodName, isSameFoodName, isTrain, mergeSearchFoods, movingAverage, r0, shanghaiToday, streakCount, weekday, type Body, type Entry, type Food, type Profile, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1214,7 +1214,8 @@ export default function App() {
     }
     setBk(""); flash(merge ? "✓ 已合并导入" : "✓ 已覆盖导入"); };
   const onFile = (e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files && e.target.files[0]; if (!f) return; f.text().then(doImport); e.target.value = ""; };
-  const ana = useMemo(() => analyzeWindow(log, date, profile), [log, date, profile]);
+  const savedTargets = useMemo(() => load<Record<string, Partial<SavedDayTarget>>>("fl_day_targets", {}), []);
+  const ana = useMemo(() => analyzeWindow(log, date, profile, savedTargets), [log, date, profile, savedTargets]);
   const streak = streakCount(log, today);
   const bodyW = body.filter((b: Body) => b.w > 0).slice(-30), bodyWa = body.filter((b: Body) => b.waist > 0).slice(-30);
   const maW = movingAverage(bodyW.map((b: Body) => ({ date: b.date, value: b.w }))).map((b) => ({ date: b.date, w: b.value, waist: 0 }));
@@ -1506,28 +1507,32 @@ export default function App() {
 
       {tab === "trend" && <div className="ct-seg"><Segmented options={[{ value: "ana", label: "📈 分析" }, { value: "body", label: "⚖️ 体重腰围" }, { value: "tips", label: "💡 建议参数" }]} value={sub} onChange={(v: string) => { setSub(v); window.scrollTo(0, 0); }} /></div>}
       {tab === "trend" && sub === "ana" && (
-      <Fragment><div className="ct-card" data-testid="ana-card" data-end={date} data-logged={loggedN} data-avgk={ana.avgKLogged} data-avgk7={ana.avgKAll}>
-        <div className="ct-chead"><h2 className="ct-ctitle">{`近7天 · ${ana.days[0]?.date.slice(5) || ""} 至 ${date.slice(5)}`}</h2></div>
-        <Table columns={["近7天", "数值"]} rows={[
-          ["记录天数", `${loggedN} / 7`],
-          ["平均热量（已记录日）", loggedN ? `${ana.avgKLogged} kcal` : "—"],
-          ["这些天的热量目标均值", loggedN ? `${ana.avgTargetKLogged} kcal（训练日 ${tgT.kcal} / 休息日 ${tgR.kcal}）` : "—"],
-          ["7日平均热量（未记录按0）", `${ana.avgKAll} kcal`],
-          ["平均蛋白（已记录日）", loggedN ? `${ana.avgPLogged} g（每日目标 ${tg.p}g）` : "—"],
-          ["7日平均蛋白（未记录按0）", `${ana.avgPAll} g`],
-          ["平均碳水（已记录日）", loggedN ? `${ana.avgCLogged} g` : "—"],
-          ["平均脂肪（已记录日）", loggedN ? `${ana.avgFLogged} g` : "—"],
-          ["蛋白达标", loggedN ? `${ana.pHitLogged} / ${loggedN} 已记录日（≥当日目标95%）` : "没有已记录日"],
-          ["蛋白达标（未记录算未达标）", `${ana.pHitCalendar} / 7`],
-          ["热量未超标", loggedN ? `${ana.kWithinLogged} / ${loggedN} 已记录日（≤当日目标105%）` : "没有已记录日"],
-          ["连续记录", `${streak} 天`],
-        ]} />
-        <Text>已记录指当天至少有一条饮食记录，包含 0 千卡补剂。未记录的日子不进入「已记录日」平均，另有一行把它们按 0 算进 7 日平均。热量图的两条虚线分别是训练日和休息日目标。</Text>
-        <ColumnSeries labels={ana.days.map((d) => d.date.slice(5) + (d.train ? "" : "休"))} series={[{ name: "热量 kcal", values: ana.days.map((d) => r0(d.k)) }]} references={[{ value: tgT.kcal, label: `训练 ${tgT.kcal}` }, { value: tgR.kcal, label: `休息 ${tgR.kcal}` }]} />
-        <ColumnSeries labels={ana.days.map((d) => d.date.slice(5) + (d.train ? "" : "休"))} series={[{ name: "蛋白 g", values: ana.days.map((d) => r0(d.p)) }]} reference={{ value: tg.p, label: `目标 ${tg.p}g` }} />
-        <details className="ct-more"><summary>每日明细</summary>
-          {ana.days.map((d) => <div key={d.date} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid #24262a", fontSize: 13 }}><span>{`${d.date.slice(5)} ${d.train ? "训练" : "休息"}`}</span><span>{d.entries ? `${r0(d.k)}/${d.targetK} kcal · 蛋白 ${r0(d.p)}/${d.targetP}g` : "未记录"}</span></div>)}
-        </details>
+      <Fragment><div className="ct-card" data-testid="ana-card" data-end={date} data-logged={loggedN} data-avgk={ana.avgKLogged} data-over={ana.overCount}>
+        <div className="ct-chead"><h2 className="ct-ctitle">{`近7天 · ${ana.days[0] ? `${Number(ana.days[0].date.slice(5, 7))}月${Number(ana.days[0].date.slice(8))}日` : ""} 至 ${Number(date.slice(5, 7))}月${Number(date.slice(8))}日`}</h2></div>
+        <p className="ct-note">每一天只和自己的目标比，规则与今日圆环相同：实际热量高于目标才算超出。未记录不计入超标，也不算成没吃够。没有当天保存的目标时，数字是按现在的身高、体重和活动量重算的。</p>
+        <div className="ct-metrics">
+          <div className="ct-metric"><span>已记录</span><b>{loggedN}<small style={{ fontSize: 14, color: "#8e8e93" }}>/7 天</small></b></div>
+          <div className="ct-metric"><span>已记录日均热量</span><b>{loggedN ? ana.avgKLogged : "—"}<small style={{ fontSize: 14, color: "#8e8e93" }}> kcal</small></b></div>
+          <div className="ct-metric"><span>未超标</span><b>{ana.withinCount}<small style={{ fontSize: 14, color: "#8e8e93" }}>{` / ${loggedN || 0} 天`}</small></b></div>
+          <div className="ct-metric"><span>超出</span><b style={{ color: ana.overCount ? "#ff453a" : "#fff" }}>{ana.overCount}<small style={{ fontSize: 14, color: "#8e8e93" }}>{` / ${loggedN || 0} 天`}</small></b></div>
+        </div>
+        <p className="ct-note">{`训练日目标 ${tgT.kcal} kcal，休息日目标 ${tgR.kcal} kcal，都是当前参数。蛋白每日 ${tg.p} g。未记录若按 0 计入，7 日平均是 ${ana.avgKAll} kcal，那不是某一天的成绩。`}</p>
+        <WeekBars days={ana.days.map((d) => ({ label: `${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))}`, sub: d.train ? "训练" : "休息", kcal: d.status === "未记录" ? null : d.shownK, target: d.targetK, status: d.status }))} />
+        <div className="ct-days">
+          {ana.days.map((d) => {
+            const wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][weekday(d.date)];
+            const cls = d.status === "超出" ? "over" : d.status === "未超标" ? "ok" : "none";
+            return <div key={d.date} className={`ct-day${d.date === date ? " on" : ""}`} data-testid={`day-${d.date}`} data-status={d.status}>
+              <div className="ct-day-top"><b>{`${Number(d.date.slice(5, 7))}月${Number(d.date.slice(8))}日 ${wd} · ${d.train ? "训练日" : "休息日"}`}</b><span className={`ct-st ${cls}`}>{d.status}</span></div>
+              {d.status === "未记录" ? <p className="ct-note">没有饮食记录。不和目标比较，也不算未达标。</p> : <Fragment>
+                <div className="ct-day-k">{d.shownK}<small>kcal</small></div>
+                <p className="ct-note">{`目标 ${d.targetK} kcal · ${d.targetSource === "saved" ? "当天保存的目标" : "按当前参数重算"} · ${d.status === "超出" ? `超出 ${d.gap}` : `还剩 ${d.gap}`}`}</p>
+                <p className="ct-note">{`蛋白 ${r0(d.p)} / ${d.targetP} g · 碳水 ${r0(d.c)} / ${d.targetC} g · 脂肪 ${r0(d.f)} / ${d.targetF} g`}</p>
+              </Fragment>}
+            </div>;
+          })}
+        </div>
+        <p className="ct-note">{loggedN ? `已记录日蛋白达到目标 95% 的有 ${ana.pHitLogged} / ${loggedN} 天。未记录的日子不在这 ${loggedN} 天里。` : "这 7 天还没有饮食记录。"}</p>
       </div></Fragment>
       )}
 
@@ -1731,6 +1736,22 @@ button:active,.ct-row:active{transform:scale(.97);opacity:.85}
 .ct-seg{position:sticky;top:env(safe-area-inset-top);z-index:30;background:#000;padding:6px 0}.ct-seg>div{width:100%;align-self:stretch!important;box-sizing:border-box;display:grid!important;grid-template-columns:repeat(3,1fr)}
 .ct-gear{display:flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;border-radius:18px;border:.5px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:rgba(235,235,245,.6);cursor:pointer;transition:background .15s,color .15s;-webkit-tap-highlight-color:transparent}.ct-gear:active{background:rgba(255,255,255,.16);color:rgba(235,235,245,.85)}
 .ct-more summary{min-height:44px;display:flex;align-items:center;color:#9a9a9a;cursor:pointer}
+.ct-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.ct-metric{background:#2c2c2e;border-radius:16px;padding:12px 14px;min-width:0}
+.ct-metric b{display:block;margin-top:2px;font-size:26px;font-weight:800;letter-spacing:-.5px;color:#fff;font-variant-numeric:tabular-nums;line-height:1.1}
+.ct-metric span{color:#8e8e93;font-size:12px;line-height:1.35}
+.ct-days{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.ct-day{background:#2c2c2e;border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.ct-day.on{box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.35)}
+.ct-day-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ct-day-top b{font-size:15px;color:#fff;font-weight:700}
+.ct-day-k{font-size:28px;font-weight:800;letter-spacing:-.6px;color:#fff;font-variant-numeric:tabular-nums;line-height:1.1}
+.ct-day-k small{font-size:13px;font-weight:600;color:#8e8e93;margin-left:4px}
+.ct-note{color:#8e8e93;font-size:12px;line-height:1.5;margin:0}
+.ct-st{flex:none;font-size:12px;font-weight:700;border-radius:999px;padding:3px 8px}
+.ct-st.ok{background:rgba(48,209,88,.18);color:#30d158}
+.ct-st.over{background:rgba(255,69,58,.18);color:#ff453a}
+.ct-st.none{background:rgba(255,255,255,.08);color:#aeaeb2}
 .ct-chat{display:flex;flex-direction:column;gap:8px;max-height:42vh;overflow-y:auto;padding:2px}
 .ct-bub{max-width:92%;padding:8px 12px;border-radius:16px;font-size:15px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
 .ct-bub.user{align-self:flex-end;background:#0a84ff;color:#fff;border-bottom-right-radius:6px}

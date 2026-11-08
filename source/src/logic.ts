@@ -95,6 +95,8 @@ export function foodFromEntry(e: Entry, isLibraryName: (name: string) => boolean
   return { n, k: e.k, p: e.p, c: e.c, f: e.f, g: 1, su: "份", u: "每份", t: "我的食物", mine: true };
 }
 
+export type HeatStatus = "未记录" | "未超标" | "超出";
+export type SavedDayTarget = { kcal: number; p: number; c: number; f: number };
 export type DayStat = Macros & {
   date: string;
   entries: number;
@@ -103,11 +105,18 @@ export type DayStat = Macros & {
   targetP: number;
   targetC: number;
   targetF: number;
+  targetSource: "saved" | "recalculated";
+  status: HeatStatus;
+  shownK: number;
+  gap: number;
 };
 
 export type WindowStats = {
   days: DayStat[];
   logged: DayStat[];
+  unlogged: number;
+  overCount: number;
+  withinCount: number;
   kcalPositive: number;
   avgKLogged: number;
   avgPLogged: number;
@@ -117,28 +126,47 @@ export type WindowStats = {
   avgPAll: number;
   avgTargetKLogged: number;
   pHitLogged: number;
-  pHitCalendar: number;
-  kWithinLogged: number;
 };
+
+export function heatStatus(kcal: number, target: number, entries: number): HeatStatus {
+  if (!(entries > 0)) return "未记录";
+  return kcal > target ? "超出" : "未超标";
+}
+
+export function savedDayTarget(raw: Partial<SavedDayTarget> | undefined): SavedDayTarget | null {
+  if (!raw) return null;
+  const nums = [raw.kcal, raw.p, raw.c, raw.f];
+  if (nums.some((n) => typeof n !== "number" || !isFinite(n) || n < 0)) return null;
+  return { kcal: raw.kcal as number, p: raw.p as number, c: raw.c as number, f: raw.f as number };
+}
 
 function avgOf(rows: readonly DayStat[], key: keyof Macros | "targetK"): number {
   if (!rows.length) return 0;
   return r0(rows.reduce((a, d) => a + d[key], 0) / rows.length);
 }
 
-export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>, end: string, profile: Profile): WindowStats {
+export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>, end: string, profile: Profile, saved?: Record<string, Partial<SavedDayTarget> | undefined>): WindowStats {
   const days: DayStat[] = lastNDays(end, 7).map((date) => {
     const es = log[date] || [];
     const s = sumEntries(es);
     const train = isTrain(date);
-    const tg = calcTargets(profile, train);
-    return { date, ...s, entries: es.length, train, targetK: tg.kcal, targetP: tg.p, targetC: tg.c, targetF: tg.f };
+    const recalc = calcTargets(profile, train);
+    const keep = savedDayTarget(saved?.[date]);
+    const targetK = keep ? keep.kcal : recalc.kcal;
+    const targetP = keep ? keep.p : recalc.p;
+    const targetC = keep ? keep.c : recalc.c;
+    const targetF = keep ? keep.f : recalc.f;
+    const entries = es.length;
+    const status = heatStatus(s.k, targetK, entries);
+    return { date, ...s, entries, train, targetK, targetP, targetC, targetF, targetSource: keep ? "saved" : "recalculated", status, shownK: Math.round(s.k), gap: Math.round(Math.abs(targetK - s.k)) };
   });
   const logged = days.filter((d) => d.entries > 0);
-  const pHit = (rows: DayStat[]) => rows.filter((d) => d.p >= d.targetP * 0.95).length;
   return {
     days,
     logged,
+    unlogged: days.filter((d) => d.status === "未记录").length,
+    overCount: days.filter((d) => d.status === "超出").length,
+    withinCount: days.filter((d) => d.status === "未超标").length,
     kcalPositive: days.filter((d) => d.k > 0).length,
     avgKLogged: avgOf(logged, "k"),
     avgPLogged: avgOf(logged, "p"),
@@ -147,9 +175,7 @@ export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>,
     avgKAll: avgOf(days, "k"),
     avgPAll: avgOf(days, "p"),
     avgTargetKLogged: avgOf(logged, "targetK"),
-    pHitLogged: pHit(logged),
-    pHitCalendar: pHit(days),
-    kWithinLogged: logged.filter((d) => d.k <= d.targetK * 1.05).length,
+    pHitLogged: logged.filter((d) => d.p >= d.targetP * 0.95).length,
   };
 }
 
