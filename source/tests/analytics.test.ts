@@ -60,10 +60,12 @@ describe("sums and the 7-day window", () => {
     }, "2026-11-08", profile);
     expect(w.days.find((d) => d.date === fri)?.targetK).toBe(trainK);
     expect(w.days.find((d) => d.date === sat)?.targetK).toBe(restK);
-    expect(w.kWithinLogged).toBe(2);
+    expect(w.withinCount).toBe(2);
+    expect(w.overCount).toBe(0);
+    expect(w.days.find((d) => d.date === fri)?.status).toBe("未超标");
+    expect(w.days.find((d) => d.date === sat)?.status).toBe("未超标");
     expect(w.avgTargetKLogged).toBe(r0((trainK + restK) / 2));
     expect(w.pHitLogged).toBe(2);
-    expect(w.pHitCalendar).toBe(2);
   });
   it("does not treat unlogged days as protein hits", () => {
     const end = "2026-11-08";
@@ -71,7 +73,8 @@ describe("sums and the 7-day window", () => {
     const w = analyzeWindow({ [end]: [e(1, 500, targetP)] }, end, profile);
     expect(w.pHitLogged).toBe(1);
     expect(w.logged).toHaveLength(1);
-    expect(w.pHitCalendar).toBe(1);
+    expect(w.unlogged).toBe(6);
+    expect(w.days.filter((d) => d.date !== end).every((d) => d.status === "未记录")).toBe(true);
   });
   it("counts a streak up to today, or through yesterday when today is empty", () => {
     const today = "2026-11-08";
@@ -109,8 +112,55 @@ describe("per 100g and servings", () => {
   });
 });
 
+describe("6 November 2026 training day", () => {
+  const end = "2026-11-08";
+  const trainK = calcTargets(profile, true).kcal;
+  const restK = calcTargets(profile, false).kcal;
+  const nov6 = (k: number) => analyzeWindow({ "2026-11-06": [e(1, k, 10)] }, end, profile).days.find((d) => d.date === "2026-11-06")!;
+  it("uses the training target, and a value between rest and training is not over", () => {
+    expect(isTrain("2026-11-06")).toBe(true);
+    expect(trainK).toBeGreaterThan(restK);
+    const mid = restK + 1;
+    expect(mid).toBeLessThan(trainK);
+    const d = nov6(mid);
+    expect(d.targetK).toBe(trainK);
+    expect(d.targetSource).toBe("recalculated");
+    expect(d.status).toBe("未超标");
+    expect(d.shownK).toBe(mid);
+  });
+  it("treats calories equal to the training target as not over, matching the today ring", () => {
+    expect(nov6(trainK).status).toBe("未超标");
+    expect(nov6(trainK).gap).toBe(0);
+  });
+  it("treats calories above the training target as over", () => {
+    const d = nov6(trainK + 40);
+    expect(d.status).toBe("超出");
+    expect(d.gap).toBe(40);
+  });
+  it("keeps an empty day as 未记录 in a mixed week and uses a saved target only when one exists", () => {
+    const w = analyzeWindow({
+      "2026-11-05": [e(1, trainK + 20, 10)],
+      "2026-11-06": [e(2, trainK - 30, 10)],
+      "2026-11-07": [e(3, restK + 10, 10)],
+    }, end, profile, { "2026-11-07": { kcal: restK - 50, p: 10, c: 10, f: 10 } });
+    const by = (iso: string) => w.days.find((d) => d.date === iso)!;
+    expect(by("2026-11-05").status).toBe("超出");
+    expect(by("2026-11-05").targetSource).toBe("recalculated");
+    expect(by("2026-11-06").status).toBe("未超标");
+    expect(by("2026-11-06").targetK).toBe(trainK);
+    expect(by("2026-11-07").targetSource).toBe("saved");
+    expect(by("2026-11-07").targetK).toBe(restK - 50);
+    expect(by("2026-11-07").status).toBe("超出");
+    expect(by("2026-11-08").status).toBe("未记录");
+    expect(w.unlogged).toBe(4);
+    expect(w.overCount).toBe(2);
+    expect(w.withinCount).toBe(1);
+    expect(w.days.filter((d) => d.status === "未记录").every((d) => d.entries === 0)).toBe(true);
+  });
+});
+
 describe("service worker", () => {
   it("bumps the cache to ct-v27", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v27"');
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v28"');
   });
 });
