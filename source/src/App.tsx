@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, PROFILE_DEFAULT, addDays, analyzeWindow, calcTargets, dayDiff, entryFromFood, foodFromEntry as foodFromEntryEx, isBaseFoodName, isSameFoodName, isTrain, mergeSearchFoods, movingAverage, needsTrainCarb, r0, shanghaiToday, streakCount, weekday, weeklyDeficit, type Body, type Entry, type Food, type Profile, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, addDays, analyzeWindow, calcTargets, dayDiff, dueReminders, entryFromFood, foodFromEntry as foodFromEntryEx, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, r0, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type Profile, type Reminder, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1057,6 +1057,8 @@ export default function App() {
   const th = useGrokTheme();
   const today = shanghaiToday();
   const [profile, setProfile] = useState<Profile>(() => ({ ...PROFILE_DEFAULT, ...load<Profile>("fl_profile_v2", PROFILE_DEFAULT) }));
+  const [remindOn, setRemindOn] = useState<boolean>(() => { try { return localStorage.getItem("fl_remind") !== "0"; } catch (e) { return true; } });
+  const [nudge, setNudge] = useState<Reminder | null>(null);
   useEffect(() => {
     try {
       if (localStorage.getItem("fl_profile_v29") === "1") return;
@@ -1088,6 +1090,7 @@ export default function App() {
   useEffect(() => save("fl_myfoods", myFoods), [myFoods]);
 
   useEffect(() => save("fl_profile_v2", profile), [profile]);
+  useEffect(() => { try { localStorage.setItem("fl_remind", remindOn ? "1" : "0"); } catch (e) { /* ignore */ } }, [remindOn]);
   useEffect(() => save("fl_log", log), [log]);
   useEffect(() => save("fl_body", body), [body]);
   const [water, setWater] = useState<Record<string, number>>(() => load<Record<string, number>>("fl_water", {}));
@@ -1119,6 +1122,37 @@ export default function App() {
   const tgT = calcTargets(profile, true), tgR = calcTargets(profile, false);
   const entries: Entry[] = log[date] || [];
   const tot = entries.reduce((a: { k: number; p: number; c: number; f: number }, e: Entry) => ({ k: a.k + e.k, p: a.p + e.p, c: a.c + e.c, f: a.f + e.f }), { k: 0, p: 0, c: 0, f: 0 });
+  const coach = todayAnalysis(tot, tg, train, shanghaiClock(new Date()).h);
+  const nudgeRef = useRef<{ log: typeof log; profile: Profile; today: string; remindOn: boolean }>({ log, profile, today, remindOn });
+  nudgeRef.current = { log, profile, today, remindOn };
+  useEffect(() => {
+    if (!remindOn) { setNudge(null); return; }
+    let timer = 0;
+    const run = () => {
+      const cur = nudgeRef.current;
+      if (!cur.remindOn) return;
+      const day = cur.today;
+      const trainNow = isTrain(day);
+      const tgNow = calcTargets(cur.profile, trainNow);
+      const es = cur.log[day] || [];
+      const sum = es.reduce((a: { k: number; p: number; c: number; f: number }, e: Entry) => ({ k: a.k + e.k, p: a.p + e.p, c: a.c + e.c, f: a.f + e.f }), { k: 0, p: 0, c: 0, f: 0 });
+      const meals = es.map((e: Entry) => e.meal);
+      const bf = es.filter((e: Entry) => e.meal === "早餐");
+      const breakfastCarbs = bf.length ? bf.reduce((a: number, e: Entry) => a + e.c, 0) : null;
+      const clock = shanghaiClock(new Date());
+      const due = dueReminders({ h: clock.h, m: clock.m, train: trainNow, meals, breakfastCarbs, tot: sum, tg: tgNow });
+      const next = pickReminder(due, seenReminders(day, localStorage));
+      if (!next) return;
+      markReminderSeen(day, next.id, localStorage);
+      setNudge(next);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setNudge(null), 6000);
+    };
+    run();
+    const onVis = () => { if (document.visibilityState === "visible") run(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.clearTimeout(timer); };
+  }, [remindOn]);
 
   const historyEntries = useMemo(() => Object.keys(log).sort().reverse().flatMap((d: string) => [...(log[d] || [])].reverse()), [log]);
   const FOODS: Food[] = useMemo(() => mergeSearchFoods(BASE, myFoods, historyEntries), [myFoods, historyEntries]);
@@ -1328,6 +1362,13 @@ export default function App() {
       {tab === "log" && <div className="ct-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="ct-chead"><h2 className="ct-ctitle">今日圆环</h2><span className={`ct-cycle${train ? "" : " rest"}`} data-testid="day-type">{train ? "训练日·高碳" : "休息日·低碳"}</span></div>
           <ActRings tot={tot} tg={tg} streak={streak} />
+        </div>}
+      {tab === "log" && <div className="ct-card" data-testid="today-analysis">
+          <div className="ct-chead"><h2 className="ct-ctitle">今日分析</h2><span className={`ct-cycle${train ? "" : " rest"}`}>{train ? "训练日·高碳" : "休息日·低碳"}</span></div>
+          <div className="ct-metrics">
+            {coach.lines.map((l) => <div key={l.name} className={`ct-metric ct-gap ${l.tone}`} data-macro={l.name}><span>{l.name}</span><b>{l.text.replace(l.name, "")}</b></div>)}
+          </div>
+          <p className="ct-advice" data-testid="today-advice">{coach.advice}</p>
         </div>}
 
       {tab === "add" && (<Fragment>
@@ -1565,6 +1606,10 @@ export default function App() {
       {((tab === "trend" && sub === "tips") || tab === "settings") && (
       <Fragment>
       {tab === "settings" && <div className="ct-pagehead" style={{ alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><button type="button" onClick={() => setTab(prevTab)} aria-label="返回" style={{ minHeight: 36, padding: "6px 12px", borderRadius: 18, border: "none", background: "rgba(255,255,255,.08)", color: "#eee", fontSize: 15, cursor: "pointer" }}>‹ 返回</button><div><h1 className="ct-htitle" style={{ fontSize: 28 }}>设置</h1></div></div></div>}
+      {tab === "settings" && <Section heading="提醒">
+        <Toggle label="打开时提醒" value={remindOn} onChange={setRemindOn} />
+        <Text>回到前台时，按当前时间和今天的进度轻提醒一次。同一条每天只出现一次，大约 6 秒后消失。</Text>
+      </Section>}
       {tab === "settings" && <Section heading="AI识别设置（智谱）">
         <AiSettings flash={flash} />
       </Section>}
@@ -1657,6 +1702,7 @@ export default function App() {
       </Fragment>
       )}
       </div>
+      {nudge && !aT && <div className="ct-nudge" role="status" data-testid="nudge"><span>{nudge.text}</span><button type="button" aria-label="关闭提醒" onClick={() => setNudge(null)}>关闭</button></div>}
       {aT && <div key={aT.n} className="ct-atoast" role="status" aria-live="polite"><span>{aT.t}</span><button type="button" onClick={undoAT}>撤销</button></div>}
       {msg && !aT && <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: "calc(120px + env(safe-area-inset-bottom) * 0.5)", zIndex: 60, background: "#1f1f1f", color: "#fff", border: "1px solid #34373c", padding: "10px 16px", borderRadius: 12, fontSize: 15 }}>{msg}</div>}
       <div style={{ height: "calc(120px + env(safe-area-inset-bottom) * 0.5)" }} aria-hidden="true" />
@@ -1770,6 +1816,14 @@ button:active,.ct-row:active{transform:scale(.97);opacity:.85}
 .ct-cycle{flex:none;font-size:12px;font-weight:700;border-radius:999px;padding:4px 8px;background:rgba(255,159,10,.16);color:#ff9f0a}
 .ct-cycle.rest{background:rgba(10,132,255,.16);color:#64d2ff}
 .ct-carb{margin:6px 0 0;font-size:12px;line-height:1.4;color:#8e8e93}
+.ct-gap b{font-size:15px;font-weight:700;letter-spacing:0;line-height:1.35}
+.ct-gap.over b{color:#ff453a}
+.ct-gap.near b{color:#ffb020}
+.ct-gap.low b{color:#fff}
+.ct-advice{margin:4px 0 0;font-size:14px;line-height:1.5;color:#d1d1d6}
+.ct-nudge{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + env(safe-area-inset-bottom)*0.5);z-index:65;display:flex;align-items:center;gap:12px;width:calc(100vw - 32px);max-width:420px;justify-content:space-between;box-sizing:border-box;padding:12px 12px 12px 16px;border-radius:16px;background:#2c2c2e;border:1px solid rgba(255,255,255,.12);color:#fff;font-size:15px;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+.ct-nudge span{flex:1 1 auto;min-width:0;line-height:1.4}
+.ct-nudge button{flex:none;min-height:36px;padding:0 12px;border:none;border-radius:10px;background:rgba(255,255,255,.1);color:#fff;font-size:14px;font-weight:700}
 .ct-st{flex:none;font-size:12px;font-weight:700;border-radius:999px;padding:3px 8px}
 .ct-st.ok{background:rgba(48,209,88,.18);color:#30d158}
 .ct-st.over{background:rgba(255,69,58,.18);color:#ff453a}
