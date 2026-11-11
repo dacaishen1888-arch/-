@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, r0, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, r0, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1109,9 +1109,13 @@ export default function App() {
   const [nudge, setNudge] = useState<Reminder | null>(null);
   useEffect(() => {
     try {
-      if (localStorage.getItem("fl_profile_v29") === "1") return;
-      localStorage.setItem("fl_profile_v29", "1");
-      setProfile((p: Profile) => ({ ...p, w: "80.1", bf: "17.7", bmr: "1795" }));
+      if (localStorage.getItem("fl_profile_v29") !== "1") {
+        localStorage.setItem("fl_profile_v29", "1");
+        setProfile((p: Profile) => ({ ...p, w: "80.1", bf: "17.7", bmr: "1795" }));
+      }
+      if (localStorage.getItem("fl_profile_v35") === "1") return;
+      localStorage.setItem("fl_profile_v35", "1");
+      setProfile((p: Profile) => migrateProteinTargets(p));
     } catch (e) { /* ignore */ }
   }, []);
   const [date, setDate] = useState<string>(today);
@@ -1697,7 +1701,7 @@ export default function App() {
           ["休息日·低碳", `${tgR.kcal}`, `${tgR.p}g`, `${tgR.c}g`, `${tgR.f}g`],
         ]} />
         <Text>{`BMR ${tgT.bmr} kcal（${tgT.bmrSource === "measured" ? "使用填写值" : tgT.bmrSource === "katch" ? "Katch-McArdle" : "Mifflin"}）；去脂体重 ${tgT.lbm} kg。TDEE 训练日 ${tgT.tdee}、休息日 ${tgR.tdee} kcal。周一到周五为训练日。`}</Text>
-        <Text>公式：有体脂率时 BMR = 370 + 21.6×体重×(1−体脂率)。蛋白约 2.5g/kg 去脂体重，训练日碳水 3g/kg、脂肪 0.69g/kg，休息日碳水 1.5g/kg、脂肪 0.81g/kg。热量默认等于这些营养素。下面留空就用公式，填写则覆盖。</Text>
+        <Text>公式：有体脂率时 BMR = 370 + 21.6×体重×(1−体脂率)。蛋白约 2.64g/kg 去脂体重，训练日碳水 3g/kg、脂肪 0.64g/kg，休息日碳水 1.5g/kg、脂肪 0.76g/kg。热量默认等于这些营养素。下面留空就用公式，填写则覆盖。</Text>
         <Grid columns={2} plain>
           <NI label="训练日热量覆盖" type="number" value={profile.tk || ""} onChange={setP("tk")} placeholder={String(tgT.kcal)} />
           <NI label="训练日蛋白 g" type="number" value={profile.tp || ""} onChange={setP("tp")} placeholder={String(tgT.p)} />

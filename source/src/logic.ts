@@ -73,14 +73,28 @@ export function calcTargets(pr: Profile, train: boolean) {
   const base = parseFloat(pr.act) || 1.55;
   const mult = train ? base : Math.max(1.2, base - 0.3);
   const hasBf = lbm < w - 0.05;
-  const p0 = r0(hasBf ? lbm * 2.5 : w * 2.06);
+  const p0 = r0(hasBf ? lbm * 2.64 : w * 2.06);
   const c0 = r0(w * (train ? 3 : 1.5));
-  const f0 = r0(w * (train ? 0.687 : 0.812));
+  const f0 = r0(w * (train ? 0.637 : 0.762));
   const p = opt(train ? pr.tp : pr.rp, p0);
   const c = opt(train ? pr.tc : pr.rc, c0);
   const f = opt(train ? pr.tf : pr.rf, f0);
   const kcal = opt(train ? pr.tk : pr.rk, r0(p * 4 + c * 4 + f * 9));
   return { bmr: r0(bmr), bmrSource: source, lbm: Math.round(lbm * 10) / 10, tdee: r0(bmr * mult), kcal, p, c, f };
+}
+
+const OLD_AUTO: Record<"tp" | "rp" | "tf" | "rf", [number, number]> = { tp: [165, 174], rp: [165, 174], tf: [55, 51], rf: [65, 61] };
+
+export function migrateProteinTargets(pr: Profile): Profile {
+  const next: Profile = { ...pr };
+  (Object.keys(OLD_AUTO) as (keyof typeof OLD_AUTO)[]).forEach((key) => {
+    const raw = pr[key];
+    if (raw == null || String(raw).trim() === "") return;
+    const n = parseFloat(String(raw));
+    const [from, to] = OLD_AUTO[key];
+    if (n === from) next[key] = String(to);
+  });
+  return next;
 }
 
 export function weeklyDeficit(pr: Profile): number {

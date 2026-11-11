@@ -65,9 +65,11 @@ describe("next-meal hint when carbs and fat compete", () => {
 describe("compact today chips and the hold-to-read tip", () => {
   const idle: HoldState = { phase: "idle", open: false };
   it("shortens each macro to a chip such as 还差75g and 还可吃715", () => {
-    const a = todayAnalysis({ k: 1400, p: 90, c: train.c - 75, f: 46 }, train, true, 12);
-    expect(a.lines.map((l) => l.chip)).toEqual(["还可吃715", "还差75g", `还差${train.c - (train.c - 75)}g`, "还可吃9g"]);
-    expect(a.lines.find((l) => l.name === "蛋白")?.text).toContain("还差 75g");
+    const a = todayAnalysis({ k: 1400, p: 90, c: train.c - 75, f: 20 }, train, true, 12);
+    expect(train.p).toBe(174);
+    expect(train.f).toBe(51);
+    expect(a.lines.map((l) => l.chip)).toEqual(["还可吃715", `还差${train.p - 90}g`, "还差75g", `还可吃${train.f - 20}g`]);
+    expect(a.lines.find((l) => l.name === "蛋白")?.text).toContain(`还差 ${train.p - 90}g`);
   });
   it("opens on a 400ms hold and closes when the finger lifts", () => {
     const held = holdPress(holdPress(idle, "down"), "hold");
