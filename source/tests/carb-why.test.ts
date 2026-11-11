@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcTargets, carbWhy, fatLeftLabel, PROFILE_DEFAULT, r0, todayAnalysis, type Profile } from "../src/logic";
+import { calcTargets, carbWhy, fatLeftLabel, holdPress, PROFILE_DEFAULT, r0, todayAnalysis, type HoldState, type Profile } from "../src/logic";
 
 const train = calcTargets(PROFILE_DEFAULT, true);
 const rest = calcTargets(PROFILE_DEFAULT, false);
@@ -33,10 +33,8 @@ describe("next-meal hint when carbs and fat compete", () => {
   it("points to low-fat carbs when carbs are still short and fat is at least 80%", () => {
     const tot = { k: 1400, p: 90, c: train.c - 60, f: train.f * 0.85 };
     const a = todayAnalysis(tot, train, true, 12);
-    expect(a.advice).toContain("少油");
-    expect(a.advice).toMatch(/米饭|燕麦/);
-    expect(a.advice).toContain(fatLeftLabel(tot.f, train.f).text);
-    expect(a.advice).toContain("下一餐少油");
+    expect(a.advice).toBe(`下一餐：多主食、少油，${fatLeftLabel(tot.f, train.f).text}`);
+    expect(a.advice.length).toBeLessThan(28);
   });
 
   it("lets carbs continue from low-fat foods after fat is already over", () => {
@@ -61,6 +59,28 @@ describe("next-meal hint when carbs and fat compete", () => {
     expect(a.advice).toContain("再补碳水");
     expect(a.advice).toContain("不加脂肪");
     expect(a.advice).toContain(`脂肪还剩 ${fatLeftLabel(12, train.f).left}g`);
+  });
+});
+
+describe("compact today chips and the hold-to-read tip", () => {
+  const idle: HoldState = { phase: "idle", open: false };
+  it("shortens each macro to a chip such as 还差75g and 还可吃715", () => {
+    const a = todayAnalysis({ k: 1400, p: 90, c: train.c - 75, f: 46 }, train, true, 12);
+    expect(a.lines.map((l) => l.chip)).toEqual(["还可吃715", "还差75g", `还差${train.c - (train.c - 75)}g`, "还可吃9g"]);
+    expect(a.lines.find((l) => l.name === "蛋白")?.text).toContain("还差 75g");
+  });
+  it("opens on a 400ms hold and closes when the finger lifts", () => {
+    const held = holdPress(holdPress(idle, "down"), "hold");
+    expect(held).toEqual({ phase: "holding", open: true });
+    expect(holdPress(held, "up")).toEqual({ phase: "idle", open: false });
+    expect(holdPress(held, "cancel")).toEqual({ phase: "idle", open: false });
+  });
+  it("toggles on a short tap and closes on a tap elsewhere", () => {
+    const opened = holdPress(holdPress(idle, "down"), "up");
+    expect(opened).toEqual({ phase: "idle", open: true });
+    expect(holdPress(opened, "outside")).toEqual(idle);
+    expect(holdPress(holdPress(idle, "down"), "cancel").open).toBe(false);
+    expect(holdPress(opened, "toggle").open).toBe(false);
   });
 });
 
