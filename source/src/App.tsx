@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, addDays, analyzeWindow, calcTargets, dayDiff, entryFromFood, foodFromEntry as foodFromEntryEx, isBaseFoodName, isSameFoodName, isTrain, mergeSearchFoods, movingAverage, r0, shanghaiToday, streakCount, weekday, type Body, type Entry, type Food, type Profile, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, addDays, analyzeWindow, calcTargets, dayDiff, entryFromFood, foodFromEntry as foodFromEntryEx, isBaseFoodName, isSameFoodName, isTrain, mergeSearchFoods, movingAverage, needsTrainCarb, r0, shanghaiToday, streakCount, weekday, weeklyDeficit, type Body, type Entry, type Food, type Profile, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1056,7 +1056,14 @@ const TABS: { v: string; l: string }[] = [{ v: "log", l: "🔥 今日" }, { v: "
 export default function App() {
   const th = useGrokTheme();
   const today = shanghaiToday();
-  const [profile, setProfile] = useState<Profile>(() => load<Profile>("fl_profile_v2", { h: "170", w: "82", age: "34", bf: "", act: "1.6", def: "18" }));
+  const [profile, setProfile] = useState<Profile>(() => ({ ...PROFILE_DEFAULT, ...load<Profile>("fl_profile_v2", PROFILE_DEFAULT) }));
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("fl_profile_v29") === "1") return;
+      localStorage.setItem("fl_profile_v29", "1");
+      setProfile((p: Profile) => ({ ...p, w: "80.1", bf: "17.7", bmr: "1795" }));
+    } catch (e) { /* ignore */ }
+  }, []);
   const [date, setDate] = useState<string>(today);
   const [log, setLog] = useState<Record<string, Entry[]>>(() => load<Record<string, Entry[]>>("fl_log", {}));
   const [body, setBody] = useState<Body[]>(() => load<Body[]>("fl_body", []));
@@ -1315,11 +1322,11 @@ export default function App() {
     <Page action={tab !== "settings" ? <button className="ct-gear" aria-label="设置" onClick={() => { setPrevTab(tab === "add" ? "log" : tab); setTab("settings"); window.scrollTo(0, 0); }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg></button> : undefined} title={tab === "log" ? "今日" : tab === "trend" ? "数据分析" : tab === "add" ? "添加" : "设置"} summary=" " width="column" lang="zh-Hans">
       <style>{CSS}</style>
       <div className="ct-stack">
-      {tab === "log" && <p className="ct-hsub" style={{ marginTop: -4 }}>{`${date} · ${train ? "训练日" : "休息日"}`}</p>}
+      {tab === "log" && <p className="ct-hsub" style={{ marginTop: -4 }}>{`${date} · ${train ? "训练日·高碳" : "休息日·低碳"}`}</p>}
       {tab === "trend" && <p className="ct-hsub" style={{ marginTop: -4 }}>{`截至 ${date} · 上海日历`}</p>}
       {(tab === "log" || tab === "trend" || tab === "add") && dateBar}
       {tab === "log" && <div className="ct-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div className="ct-chead"><h2 className="ct-ctitle">今日圆环</h2></div>
+          <div className="ct-chead"><h2 className="ct-ctitle">今日圆环</h2><span className={`ct-cycle${train ? "" : " rest"}`} data-testid="day-type">{train ? "训练日·高碳" : "休息日·低碳"}</span></div>
           <ActRings tot={tot} tg={tg} streak={streak} />
         </div>}
 
@@ -1483,7 +1490,7 @@ export default function App() {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {MEALS.filter((m: string) => entries.some((e: Entry) => e.meal === m)).map((m: string) => {
               const es = entries.filter((e: Entry) => e.meal === m);
-              const mk = es.reduce((a: number, e: Entry) => a + e.k, 0), mp = es.reduce((a: number, e: Entry) => a + e.p, 0);
+              const mk = es.reduce((a: number, e: Entry) => a + e.k, 0), mp = es.reduce((a: number, e: Entry) => a + e.p, 0), mc = es.reduce((a: number, e: Entry) => a + e.c, 0);
               return (
                 <div key={m} className="ct-meal" data-meal={m} style={{ background: `${MEAL_C[m]}14`, border: `1px solid ${MEAL_C[m]}33`, borderLeft: `4px solid ${MEAL_C[m]}`, borderRadius: 16, padding: "10px 12px 4px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: `1px solid ${MEAL_C[m]}33`, paddingBottom: 8 }}>
@@ -1491,6 +1498,7 @@ export default function App() {
                     <span style={{ color: MEAL_C[m], fontWeight: 700, fontSize: 16 }}>{m}</span>
                     <span style={{ marginLeft: "auto", color: th.text.secondary, fontSize: 13 }}><b style={{ color: MEAL_C[m] }}>{r0(mk)}</b> kcal · 蛋白 {r0(mp)}g</span>
                   </div>
+                  {needsTrainCarb(train, m, mc) && <p className="ct-carb" data-testid={`carb-${m}`}>训练前后补碳：建议各 40–60g</p>}
                   {es.map((e: Entry) => (
                     <div key={e.id} className={hl.includes(e.id) ? "ct-hl" : ""} style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${th.border.subtle}`, color: th.text.secondary, fontSize: th.font.body2.fontSize }}>
                       <span style={{ color: th.text.primary }}>{e.name} {e.grams ? `${e.grams}g` : ""}</span>
@@ -1509,7 +1517,7 @@ export default function App() {
       {tab === "trend" && sub === "ana" && (
       <Fragment><div className="ct-card" data-testid="ana-card" data-end={date} data-logged={loggedN} data-avgk={ana.avgKLogged} data-over={ana.overCount}>
         <div className="ct-chead"><h2 className="ct-ctitle">{`近7天 · ${ana.days[0] ? `${Number(ana.days[0].date.slice(5, 7))}月${Number(ana.days[0].date.slice(8))}日` : ""} 至 ${Number(date.slice(5, 7))}月${Number(date.slice(8))}日`}</h2></div>
-        <p className="ct-note">每一天只和自己的目标比，规则与今日圆环相同：实际热量高于目标才算超出。未记录不计入超标，也不算成没吃够。没有当天保存的目标时，数字是按现在的身高、体重和活动量重算的。</p>
+        <p className="ct-note">每一天只和自己的目标比，规则与今日圆环相同：实际热量高于目标才算超出。未记录不计入超标，也不算成没吃够。没有当天保存的目标时，按当前碳循环重算：训练日高碳，休息日低碳。</p>
         <div className="ct-metrics">
           <div className="ct-metric"><span>已记录</span><b>{loggedN}<small style={{ fontSize: 14, color: "#8e8e93" }}>/7 天</small></b></div>
           <div className="ct-metric"><span>已记录日均热量</span><b>{loggedN ? ana.avgKLogged : "—"}<small style={{ fontSize: 14, color: "#8e8e93" }}> kcal</small></b></div>
@@ -1577,16 +1585,27 @@ export default function App() {
           <NI label="身高 cm" type="number" value={profile.h} onChange={setP("h")} />
           <NI label="体重 kg" type="number" value={profile.w} onChange={setP("w")} />
           <NI label="年龄" type="number" value={profile.age} onChange={setP("age")} />
-          <NI label="体脂率 %（可选，填了用 Katch 公式）" type="number" value={profile.bf} onChange={setP("bf")} />
-          <Select label="训练日活动系数" options={[{ value: "1.45", label: "1.45 久坐办公+训练" }, { value: "1.6", label: "1.6 训练+日常6-8k步" }, { value: "1.75", label: "1.75 训练+体力活/1万步+" }]} value={profile.act} onChange={setP("act")} />
-          <Select label="热量赤字" options={[{ value: "15", label: "15% 温和" }, { value: "18", label: "18% 推荐" }, { value: "20", label: "20% 较快" }]} value={profile.def} onChange={setP("def")} />
+          <NI label="体脂率 %（填了优先用 Katch：370+21.6×去脂体重）" type="number" value={profile.bf} onChange={setP("bf")} />
+          <NI label="基础代谢 kcal（可选，留空按公式）" type="number" value={profile.bmr || ""} onChange={setP("bmr")} placeholder="1795" />
+          <Select label="训练日活动系数（用来估算缺口）" options={[{ value: "1.45", label: "1.45 久坐办公+训练" }, { value: "1.6", label: "1.6 训练+日常6-8k步" }, { value: "1.75", label: "1.75 训练+体力活/1万步+" }]} value={profile.act} onChange={setP("act")} />
         </Grid>
+        <Text>{`碳循环：训练日高碳保力量，休息日低碳拉缺口，周平均每日缺口约 ${weeklyDeficit(profile)} kcal。`}</Text>
         <Table columns={["", "热量", "蛋白", "碳水", "脂肪"]} rows={[
-          ["训练日", `${tgT.kcal}`, `${tgT.p}g`, `${tgT.c}g`, `${tgT.f}g`],
-          ["休息日", `${tgR.kcal}`, `${tgR.p}g`, `${tgR.c}g`, `${tgR.f}g`],
+          ["训练日·高碳", `${tgT.kcal}`, `${tgT.p}g`, `${tgT.c}g`, `${tgT.f}g`],
+          ["休息日·低碳", `${tgR.kcal}`, `${tgR.p}g`, `${tgR.c}g`, `${tgR.f}g`],
         ]} />
-        <Text>{`BMR ${tgT.bmr} kcal；TDEE 训练日 ${tgT.tdee}、休息日 ${tgR.tdee} kcal。`}</Text>
-        <Text>算法：Mifflin-St Jeor 男性 BMR = 10×体重 + 6.25×身高 − 5×年龄 + 5；休息日活动系数比训练日低0.3。蛋白 2.1g/kg，脂肪 0.8g/kg，剩余热量给碳水，所以训练日碳水自动更高。</Text>
+        <Text>{`BMR ${tgT.bmr} kcal（${tgT.bmrSource === "measured" ? "使用填写值" : tgT.bmrSource === "katch" ? "Katch-McArdle" : "Mifflin"}）；去脂体重 ${tgT.lbm} kg。TDEE 训练日 ${tgT.tdee}、休息日 ${tgR.tdee} kcal。周一到周五为训练日。`}</Text>
+        <Text>公式：有体脂率时 BMR = 370 + 21.6×体重×(1−体脂率)。蛋白约 2.5g/kg 去脂体重，训练日碳水 3g/kg、脂肪 0.69g/kg，休息日碳水 1.5g/kg、脂肪 0.81g/kg。热量默认等于这些营养素。下面留空就用公式，填写则覆盖。</Text>
+        <Grid columns={2} plain>
+          <NI label="训练日热量覆盖" type="number" value={profile.tk || ""} onChange={setP("tk")} placeholder={String(tgT.kcal)} />
+          <NI label="训练日蛋白 g" type="number" value={profile.tp || ""} onChange={setP("tp")} placeholder={String(tgT.p)} />
+          <NI label="训练日碳水 g" type="number" value={profile.tc || ""} onChange={setP("tc")} placeholder={String(tgT.c)} />
+          <NI label="训练日脂肪 g" type="number" value={profile.tf || ""} onChange={setP("tf")} placeholder={String(tgT.f)} />
+          <NI label="休息日热量覆盖" type="number" value={profile.rk || ""} onChange={setP("rk")} placeholder={String(tgR.kcal)} />
+          <NI label="休息日蛋白 g" type="number" value={profile.rp || ""} onChange={setP("rp")} placeholder={String(tgR.p)} />
+          <NI label="休息日碳水 g" type="number" value={profile.rc || ""} onChange={setP("rc")} placeholder={String(tgR.c)} />
+          <NI label="休息日脂肪 g" type="number" value={profile.rf || ""} onChange={setP("rf")} placeholder={String(tgR.f)} />
+        </Grid>
       </Section>}
 
       {tab === "settings" && <Section heading="补剂与饮水建议">
@@ -1595,7 +1614,7 @@ export default function App() {
           { label: "一水肌酸", value: "每天3–5g（食物库默认5g，0热量），每天固定吃，不用区分训练日和休息日；随水或随餐吃都可以。体重短期上升1kg左右是水分，不是脂肪。" },
           { label: "乳清蛋白", value: "每天1–2勺补足蛋白缺口；按你的产品1勺=30g蛋白，热量约150kcal（约40g粉、碳水4g、脂肪2g，为估算，以包装为准，可用自定义食物按包装改）。" },
           { label: "锌镁片", value: "睡前空腹，与钙/奶制品间隔2小时，有助睡眠质量。" },
-          { label: "饮水", value: `每天约 ${r0((parseFloat(profile.w) || 82) * 35 / 100) / 10} L（35ml/kg），训练日再加0.5–1L；尿液淡黄为宜。` },
+          { label: "饮水", value: `每天约 ${r0((parseFloat(profile.w) || 80.1) * 35 / 100) / 10} L（35ml/kg），训练日再加0.5–1L；尿液淡黄为宜。` },
         ]} />
       </Section>}
       {tab === "trend" && sub === "tips" && <Fragment>
@@ -1748,6 +1767,9 @@ button:active,.ct-row:active{transform:scale(.97);opacity:.85}
 .ct-day-k{font-size:28px;font-weight:800;letter-spacing:-.6px;color:#fff;font-variant-numeric:tabular-nums;line-height:1.1}
 .ct-day-k small{font-size:13px;font-weight:600;color:#8e8e93;margin-left:4px}
 .ct-note{color:#8e8e93;font-size:12px;line-height:1.5;margin:0}
+.ct-cycle{flex:none;font-size:12px;font-weight:700;border-radius:999px;padding:4px 8px;background:rgba(255,159,10,.16);color:#ff9f0a}
+.ct-cycle.rest{background:rgba(10,132,255,.16);color:#64d2ff}
+.ct-carb{margin:6px 0 0;font-size:12px;line-height:1.4;color:#8e8e93}
 .ct-st{flex:none;font-size:12px;font-weight:700;border-radius:999px;padding:3px 8px}
 .ct-st.ok{background:rgba(48,209,88,.18);color:#30d158}
 .ct-st.over{background:rgba(255,69,58,.18);color:#ff453a}

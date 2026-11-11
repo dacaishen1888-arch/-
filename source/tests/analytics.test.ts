@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
-import { addDays, analyzeWindow, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, movingAverage, r0, streakCount, sumEntries, type Entry, type Food, type Profile } from "../src/logic";
+import { addDays, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weeklyDeficit, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
 
 const profile: Profile = { h: "170", w: "82", age: "34", bf: "", act: "1.6", def: "18" };
 const e = (id: number, k: number, p: number, c = 0, f = 0, grams = 100): Entry => ({ id, meal: "午餐", name: "食物", grams, k, p, c, f });
@@ -159,8 +159,53 @@ describe("6 November 2026 training day", () => {
   });
 });
 
+describe("carb cycle from the 2026-11-11 measurement", () => {
+  const pr = PROFILE_DEFAULT;
+  it("prefers the entered BMR, otherwise Katch-McArdle from body fat", () => {
+    expect(bmrOf(pr)).toMatchObject({ source: "measured", bmr: 1795 });
+    const katch = bmrOf({ ...pr, bmr: "" });
+    expect(katch.source).toBe("katch");
+    expect(katch.bmr).toBeCloseTo(370 + 21.6 * 80.1 * (1 - 0.177), 5);
+    expect(bmrOf({ ...pr, bmr: "", bf: "" }).source).toBe("mifflin");
+  });
+  it("lands near the high-carb training day and low-carb rest day", () => {
+    const t = calcTargets(pr, true);
+    const r = calcTargets(pr, false);
+    expect(t.p).toBe(165);
+    expect(t.c).toBe(240);
+    expect(t.f).toBe(55);
+    expect(t.kcal).toBe(4 * 165 + 4 * 240 + 9 * 55);
+    expect(t.kcal).toBeGreaterThan(2100);
+    expect(t.kcal).toBeLessThan(2200);
+    expect(r.p).toBe(165);
+    expect(r.c).toBe(120);
+    expect(r.f).toBe(65);
+    expect(r.kcal).toBe(4 * 165 + 4 * 120 + 9 * 65);
+    expect(r.kcal).toBeGreaterThan(1700);
+    expect(r.kcal).toBeLessThan(1800);
+    expect(t.kcal).toBeGreaterThan(r.kcal);
+    expect(weeklyDeficit(pr)).toBeGreaterThan(0);
+  });
+  it("lets a manual override replace one macro and keeps Friday on the training target", () => {
+    const t = calcTargets({ ...pr, tp: "170" }, true);
+    expect(t.p).toBe(170);
+    expect(t.c).toBe(240);
+    expect(calcTargets({ ...pr, tk: "2200" }, true).kcal).toBe(2200);
+    const w = analyzeWindow({ "2026-11-06": [{ id: 1, meal: "午餐", name: "a", grams: 100, k: 2000, p: 150, c: 200, f: 50 }] }, "2026-11-08", pr);
+    const fri = w.days.find((d) => d.date === "2026-11-06")!;
+    expect(fri.train).toBe(true);
+    expect(fri.targetK).toBe(calcTargets(pr, true).kcal);
+    expect(fri.status).toBe("未超标");
+    expect(needsTrainCarb(true, "早餐", 20)).toBe(true);
+    expect(needsTrainCarb(true, "训练后", 39)).toBe(true);
+    expect(needsTrainCarb(true, "午餐", 20)).toBe(false);
+    expect(needsTrainCarb(false, "早餐", 10)).toBe(false);
+    expect(needsTrainCarb(true, "早餐", 40)).toBe(false);
+  });
+});
+
 describe("service worker", () => {
-  it("bumps the cache to ct-v27", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v28"');
+  it("bumps the cache to ct-v29", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v29"');
   });
 });
