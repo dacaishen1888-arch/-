@@ -122,6 +122,32 @@ function gapLine(name: string, unit: string, value: number, target: number, must
   return { name, text: `${name}还可吃 ${left}${u}`, tone: "ok", must: false, done: false };
 }
 
+export function fatLeftLabel(eaten: number, target: number): { text: string; tone: "ok" | "low" | "over"; left: number } {
+  const over = r0(eaten - target);
+  const left = Math.max(0, r0(target - eaten));
+  if (over > 0) return { text: `脂肪已超 ${over}g`, tone: "over", left: 0 };
+  return { text: `脂肪还剩 ${left}g`, tone: left < 10 ? "low" : "ok", left };
+}
+
+export function carbWhy(tg: TodayTargets & { tdee: number }, train: boolean): string[] {
+  const sum = r0(tg.p * 4 + tg.c * 4 + tg.f * 9);
+  const kind = train ? "训练日" : "休息日";
+  const gap = r0(tg.tdee - tg.kcal);
+  const budget = sum === tg.kcal
+    ? `热量已经算好：${kind} 蛋白${tg.p}g×4 + 碳水${tg.c}g×4 + 脂肪${tg.f}g×9 = ${sum} kcal，脂肪守住、碳水吃够，热量刚好在线。`
+    : `热量已经算好：${kind} 蛋白${tg.p}g×4 + 碳水${tg.c}g×4 + 脂肪${tg.f}g×9 = ${sum} kcal，当天热量目标 ${tg.kcal} kcal。脂肪守住、碳水吃够，就按这条线走。`;
+  const room = gap > 0
+    ? `目标本身低于消耗约 ${gap} kcal，偶尔多一两百 kcal 仍在缺口里。热量容易超的是油和零食，不是主食。`
+    : "热量容易超的是油和零食，不是主食。";
+  return [
+    "碳水和脂肪分开算：米饭、面、燕麦、红薯、土豆、香蕉几乎不含脂肪，多吃主食只加碳水，脂肪基本不变。",
+    "脂肪超标多来自炒菜油、肥肉、坚果、油炸和酱料；训练日多加主食、少放油，蛋白选鸡胸、鱼虾、瘦牛肉、蛋清。",
+    budget,
+    room,
+    "吃够的碳水用来补充训练消耗的肌糖原，不会变成腹部脂肪。",
+  ];
+}
+
 export function todayAnalysis(tot: Macros, tg: TodayTargets, train: boolean, hour = 12): { lines: GapLine[]; summary: string; advice: string } {
   const lines = [
     gapLine("热量", "kcal", tot.k, tg.kcal, false),
@@ -132,16 +158,26 @@ export function todayAnalysis(tot: Macros, tg: TodayTargets, train: boolean, hou
   const summary = lines.map((l) => l.text).join(" · ");
   const proteinShort = tg.p - tot.p >= 20;
   const carbShort = tg.c - tot.c >= 40;
-  const fatHot = tot.f >= tg.f * 0.9;
+  const carbNeed = train && tot.c + 1e-6 < tg.c;
+  const fat = fatLeftLabel(tot.f, tg.f);
+  const fatRatio = tg.f > 0 ? tot.f / tg.f : 0;
+  const fatHot = fatRatio >= 0.9;
   const kcalOver = tot.k > tg.kcal;
   const kcalNear = !kcalOver && tot.k >= tg.kcal * 0.9;
   const kcalTooLow = train && hour >= 16 && tot.k < tg.kcal - 400;
+  const kcalLeft = tg.kcal - tot.k;
+  const macroNeed = Math.max(0, tg.p - tot.p) * 4 + Math.max(0, tg.c - tot.c) * 4;
+  const lean = "用米饭、燕麦、红薯、土豆、香蕉这些少油主食，蛋白选鸡胸、鱼虾、蛋清";
   let advice = train ? "按训练日高碳继续。热量是上限，不必吃满。" : "按休息日低碳继续。热量是上限，不必吃满。";
   if (kcalOver) advice = "热量已超上限，后面清淡一点。";
   else if (kcalTooLow) advice = "训练日热量明显不足，别吃太少。";
-  else if (fatHot && tot.f > tg.f && proteinShort) advice = "脂肪已超标，后面少油；蛋白用乳清补一点。";
-  else if (fatHot && tot.f > tg.f) advice = "脂肪已超标，后面少油。";
-  else if (fatHot) advice = "脂肪已接近目标，后面少油。";
+  else if (carbNeed && fatRatio >= 0.8) advice = fat.tone === "over"
+    ? `脂肪超了，碳水还可以吃，${lean}。${fat.text}，下一餐少油。`
+    : `碳水还要吃够，${lean}。${fat.text}，下一餐少油。`;
+  else if (fat.tone === "over" && proteinShort) advice = `脂肪已超标，后面少油；蛋白用乳清补一点。碳水还可以吃，换成少油的食物。`;
+  else if (fat.tone === "over") advice = "脂肪已超标，后面少油。碳水还可以吃，换成少油的食物。";
+  else if (fatHot) advice = `脂肪已接近目标，后面少油。${fat.text}，下一餐少油。`;
+  else if (kcalLeft < macroNeed) advice = `热量剩下的不够同时补满，先补蛋白，再补碳水，尽量不加脂肪。${fat.text}，下一餐少油。`;
   else if (proteinShort && train && carbShort) advice = "蛋白还不够，建议补蛋白或乳清；训练前后再补碳。";
   else if (proteinShort) advice = "蛋白还不够，建议补蛋白或乳清。";
   else if (train && carbShort) advice = "训练日碳水不足，训练前后补碳。";

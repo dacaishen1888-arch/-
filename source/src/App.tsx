@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, clampQty, dayDiff, dueReminders, entryFromFood, entryFromSupplement, foodFromEntry as foodFromEntryEx, formatQty, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, r0, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type Profile, type Reminder, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, r0, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type Profile, type Reminder, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1390,6 +1390,10 @@ export default function App() {
           </div>
           <p className="ct-advice" data-testid="today-advice">{coach.advice}</p>
         </div>}
+      {tab === "log" && <details className="ct-card ct-why" data-testid="carb-why">
+          <summary>为什么碳水吃够不会超？</summary>
+          <div className="ct-why-body">{carbWhy(tg, train).map((line) => <p key={line} className="ct-note">{line}</p>)}</div>
+        </details>}
 
       {tab === "add" && (<Fragment>
       <div className="ct-strip" data-testid="strip">
@@ -1400,6 +1404,7 @@ export default function App() {
           {sess.length > 0 && <button type="button" className="ct-sbtn" aria-expanded={sessOpen} onClick={() => setSessOpen(!sessOpen)}>{`本次 ${sess.length} ${sessOpen ? "▴" : "▾"}`}</button>}
         </div>
         <div className="ct-sbar"><div style={{ width: `${Math.min(100, tot.k / (tg.kcal || 1) * 100)}%`, background: tot.k > tg.kcal ? "#ff453a" : "linear-gradient(90deg,#ff6b2c,#ff2d55)" }} /></div>
+        <div className={`ct-fatleft ${fatLeftLabel(tot.f, tg.f).tone}`} data-testid="fat-left">{fatLeftLabel(tot.f, tg.f).text}</div>
         {sessOpen && sess.length > 0 && <div className="ct-sess">{sess.map((e: Entry) => <div key={e.id} className={hl.includes(e.id) ? "ct-hl" : ""}><span>{e.name}{e.grams ? ` ${r0(e.grams)}g` : ""}<span style={{ color: "#8e8e93" }}>{` · ${r0(e.k)}kcal`}</span></span><button type="button" aria-label={`删除 ${e.name}`} onClick={() => rmIds([e.id])}>✕</button></div>)}</div>}
       </div>
       <Section heading={`添加到 ${meal}`}>
@@ -1867,6 +1872,17 @@ button:active,.ct-row:active{transform:scale(.97);opacity:.85}
 .ct-srow{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid rgba(255,255,255,.06)}
 .ct-srow .ct-pill{flex:0 1 auto;max-width:46%}
 .ct-advice{margin:4px 0 0;font-size:14px;line-height:1.5;color:#d1d1d6}
+.ct-why{padding:0}
+.ct-why summary{list-style:none;cursor:pointer;min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px;color:#fff;font-size:15px;font-weight:700}
+.ct-why summary::-webkit-details-marker{display:none}
+.ct-why summary:after{content:"›";color:#8e8e93;font-size:20px;font-weight:500;transition:transform .15s}
+.ct-why[open] summary:after{transform:rotate(90deg)}
+.ct-why-body{display:flex;flex-direction:column;gap:8px;padding:0 16px 14px}
+.ct-why-body .ct-note{color:#d1d1d6;font-size:13px}
+.ct-fatleft{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.ct-fatleft.ok{color:#d1d1d6}
+.ct-fatleft.low{color:#ff9f0a}
+.ct-fatleft.over{color:#ff453a}
 .ct-nudge{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + env(safe-area-inset-bottom)*0.5);z-index:65;display:flex;align-items:center;gap:12px;width:calc(100vw - 32px);max-width:420px;justify-content:space-between;box-sizing:border-box;padding:12px 12px 12px 16px;border-radius:16px;background:#2c2c2e;border:1px solid rgba(255,255,255,.12);color:#fff;font-size:15px;box-shadow:0 8px 24px rgba(0,0,0,.45)}
 .ct-nudge span{flex:1 1 auto;min-width:0;line-height:1.4}
 .ct-nudge button{flex:none;min-height:36px;padding:0 12px;border:none;border-radius:10px;background:rgba(255,255,255,.1);color:#fff;font-size:14px;font-weight:700}
