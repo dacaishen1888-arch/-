@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, r0, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type Profile, type Reminder, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, r0, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1051,6 +1051,37 @@ function Ring({ label, v, t, unit }: { label: string; v: number; t: number; unit
   );
 }
 
+function WhyTip({ lines }: { lines: string[] }) {
+  const [st, setSt] = useState<HoldState>({ phase: "idle", open: false });
+  const root = useRef<HTMLSpanElement>(null);
+  const timer = useRef(0);
+  const apply = (event: HoldEvent) => setSt((s) => holdPress(s, event));
+  useEffect(() => {
+    const el = root.current?.querySelector("button");
+    if (!el) return;
+    const down = (e: TouchEvent) => { if (e.cancelable) e.preventDefault(); window.clearTimeout(timer.current); apply("down"); timer.current = window.setTimeout(() => apply("hold"), 400); };
+    const up = () => { window.clearTimeout(timer.current); apply("up"); };
+    const cancel = () => { window.clearTimeout(timer.current); apply("cancel"); };
+    const menu = (e: Event) => e.preventDefault();
+    el.addEventListener("touchstart", down, { passive: false });
+    el.addEventListener("touchend", up);
+    el.addEventListener("touchcancel", cancel);
+    el.addEventListener("contextmenu", menu);
+    return () => { window.clearTimeout(timer.current); el.removeEventListener("touchstart", down); el.removeEventListener("touchend", up); el.removeEventListener("touchcancel", cancel); el.removeEventListener("contextmenu", menu); };
+  }, []);
+  useEffect(() => {
+    if (!st.open) return;
+    const away = (e: Event) => { if (root.current?.contains(e.target as Node)) return; apply("outside"); };
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("touchstart", away, true);
+    return () => { document.removeEventListener("pointerdown", away, true); document.removeEventListener("touchstart", away, true); };
+  }, [st.open]);
+  return <span className="ct-tipwrap" ref={root}>
+    <button type="button" className="ct-info" aria-label="为什么碳水吃够不会超" aria-expanded={st.open} onContextMenu={(e) => e.preventDefault()} onPointerDown={(e) => { if (e.pointerType === "touch") return; window.clearTimeout(timer.current); apply("down"); timer.current = window.setTimeout(() => apply("hold"), 400); }} onPointerUp={(e) => { if (e.pointerType === "touch") return; window.clearTimeout(timer.current); apply("up"); }} onPointerCancel={(e) => { if (e.pointerType === "touch") return; window.clearTimeout(timer.current); apply("cancel"); }} onClick={(e) => { if (e.detail !== 0) return; apply("toggle"); }}>?</button>
+    {st.open && <div className="ct-tip" role="tooltip" data-testid="carb-why"><b>为什么碳水吃够不会超？</b>{lines.map((line) => <p key={line}>{line}</p>)}</div>}
+  </span>;
+}
+
 function GroupAvg({ title, g }: { title: string; g: { days: number; k: number; p: number; c: number; f: number; targetK: number; targetP: number; targetC: number; targetF: number; adherence: number } }) {
   if (!g.days) return <p className="ct-note">{`没有已记录的${title}。`}</p>;
   return <div className="ct-group" data-testid={`avg-${title}`}><b>{`${title}均 · ${g.days} 天 · 热量 ${g.adherence}%`}</b><p className="ct-note">{`热量 ${g.k}/${g.targetK} kcal · 蛋白 ${g.p}/${g.targetP} g · 碳水 ${g.c}/${g.targetC} g · 脂肪 ${g.f}/${g.targetF} g`}</p></div>;
@@ -1383,17 +1414,13 @@ export default function App() {
           <div className="ct-chead"><h2 className="ct-ctitle">今日圆环</h2><span className={`ct-cycle${train ? "" : " rest"}`} data-testid="day-type">{train ? "训练日·高碳" : "休息日·低碳"}</span></div>
           <ActRings tot={tot} tg={tg} streak={streak} />
         </div>}
-      {tab === "log" && <div className="ct-card" data-testid="today-analysis">
-          <div className="ct-chead"><h2 className="ct-ctitle">今日分析</h2><span className={`ct-cycle${train ? "" : " rest"}`}>{train ? "训练日·高碳" : "休息日·低碳"}</span></div>
-          <div className="ct-metrics">
-            {coach.lines.map((l) => <div key={l.name} className={`ct-metric ct-gap ${l.tone}`} data-macro={l.name} data-must={l.must ? "1" : "0"} data-done={l.done ? "1" : "0"}><span>{l.name}{l.must && <em className={`ct-badge${l.done ? " done" : ""}`}>{l.done ? "已吃够" : "必须吃够"}</em>}</span><b>{l.text.replace(l.name, "")}</b></div>)}
+      {tab === "log" && <div className="ct-card ct-ana" data-testid="today-analysis">
+          <div className="ct-chead"><h2 className="ct-ctitle">今日分析</h2><span className="ct-ana-side"><WhyTip lines={carbWhy(tg, train)} /><span className={`ct-cycle${train ? "" : " rest"}`}>{train ? "训练日·高碳" : "休息日·低碳"}</span></span></div>
+          <div className="ct-chips" data-testid="today-chips">
+            {coach.lines.map((l) => <div key={l.name} className={`ct-chip ${l.tone}`} data-macro={l.name} data-must={l.must ? "1" : "0"} data-done={l.done ? "1" : "0"}><span>{l.name}{l.must && !l.done ? <em className="ct-bi">必</em> : null}</span><b>{l.chip}</b></div>)}
           </div>
           <p className="ct-advice" data-testid="today-advice">{coach.advice}</p>
         </div>}
-      {tab === "log" && <details className="ct-card ct-why" data-testid="carb-why">
-          <summary>为什么碳水吃够不会超？</summary>
-          <div className="ct-why-body">{carbWhy(tg, train).map((line) => <p key={line} className="ct-note">{line}</p>)}</div>
-        </details>}
 
       {tab === "add" && (<Fragment>
       <div className="ct-strip" data-testid="strip">
@@ -1871,14 +1898,25 @@ button:active,.ct-row:active{transform:scale(.97);opacity:.85}
 .ct-supp{display:flex;flex-direction:column}
 .ct-srow{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid rgba(255,255,255,.06)}
 .ct-srow .ct-pill{flex:0 1 auto;max-width:46%}
-.ct-advice{margin:4px 0 0;font-size:14px;line-height:1.5;color:#d1d1d6}
-.ct-why{padding:0}
-.ct-why summary{list-style:none;cursor:pointer;min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px;color:#fff;font-size:15px;font-weight:700}
-.ct-why summary::-webkit-details-marker{display:none}
-.ct-why summary:after{content:"›";color:#8e8e93;font-size:20px;font-weight:500;transition:transform .15s}
-.ct-why[open] summary:after{transform:rotate(90deg)}
-.ct-why-body{display:flex;flex-direction:column;gap:8px;padding:0 16px 14px}
-.ct-why-body .ct-note{color:#d1d1d6;font-size:13px}
+.ct-ana{padding:10px 12px;overflow:visible}
+.ct-ana .ct-chead{margin-bottom:8px}
+.ct-ana-side{display:flex;align-items:center;gap:6px;min-width:0}
+.ct-tipwrap{position:relative;display:flex}
+.ct-info{flex:none;width:22px;height:22px;border-radius:11px;border:1px solid rgba(255,255,255,.28);background:transparent;color:#d1d1d6;font-size:13px;font-weight:700;line-height:20px;padding:0;cursor:pointer;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.ct-tip{position:absolute;z-index:40;top:30px;right:0;width:min(280px,calc(100vw - 48px));max-height:46vh;overflow:auto;box-sizing:border-box;padding:10px 12px;border-radius:14px;background:#2c2c2e;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 28px rgba(0,0,0,.5);text-align:left;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.ct-tip b{display:block;margin:0 0 6px;color:#fff;font-size:13px}
+.ct-tip p{margin:0 0 6px;color:#d1d1d6;font-size:12px;line-height:1.45}
+.ct-chips{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.ct-chip{background:#2c2c2e;border-radius:12px;padding:6px 2px;min-width:0;text-align:center}
+.ct-chip span{display:flex;align-items:center;justify-content:center;gap:2px;color:#8e8e93;font-size:11px;line-height:1.2;white-space:nowrap}
+.ct-chip b{display:block;margin-top:2px;font-size:12px;font-weight:750;letter-spacing:-.3px;color:#f2f3f5;font-variant-numeric:tabular-nums;line-height:1.2;white-space:nowrap}
+.ct-chip.must{box-shadow:inset 0 0 0 1.5px rgba(255,159,10,.85)}
+.ct-chip.must b{color:#ff9f0a}
+.ct-chip.done{box-shadow:inset 0 0 0 1.5px rgba(48,209,88,.7)}
+.ct-chip.done b{color:#30d158}
+.ct-chip.over b{color:#ff453a}
+.ct-bi{font-style:normal;font-size:9px;font-weight:800;color:#1a1206;background:#ff9f0a;border-radius:3px;padding:0 2px;line-height:1.35}
+.ct-advice{margin:8px 0 0;font-size:12px;line-height:1.35;color:#8e8e93;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ct-fatleft{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
 .ct-fatleft.ok{color:#d1d1d6}
 .ct-fatleft.low{color:#ff9f0a}

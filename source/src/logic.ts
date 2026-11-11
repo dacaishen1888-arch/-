@@ -97,7 +97,7 @@ export function needsTrainCarb(train: boolean, meal: string, carbs: number): boo
 }
 
 export type GapTone = "ok" | "low" | "near" | "over" | "must" | "done";
-export type GapLine = { name: string; text: string; tone: GapTone; must: boolean; done: boolean };
+export type GapLine = { name: string; text: string; chip: string; tone: GapTone; must: boolean; done: boolean };
 export type TodayTargets = { kcal: number; p: number; c: number; f: number };
 
 export function isMustReach(name: string, train: boolean): boolean {
@@ -107,19 +107,23 @@ export function isMustReach(name: string, train: boolean): boolean {
 
 function macroPct(v: number, t: number): number { return t > 0 ? Math.round(v / t * 100) : 0; }
 
+function chipOf(text: string): string {
+  return text.replace(/^(热量|蛋白|碳水|脂肪)/, "").replace(/\s/g, "").replace(/kcal/g, "");
+}
+
 function gapLine(name: string, unit: string, value: number, target: number, must: boolean): GapLine {
   const left = Math.max(0, r0(target - value));
   const over = Math.max(0, r0(value - target));
   const p = macroPct(value, target);
   const u = unit === "kcal" ? " kcal" : unit;
+  const line = (text: string, tone: GapTone, done: boolean): GapLine => ({ name, text, chip: chipOf(text), tone, must, done });
   if (must) {
-    if (value + 1e-6 >= target) return { name, text: `${name}已吃够`, tone: "done", must: true, done: true };
-    return { name, text: `${name}还差 ${left}${u}`, tone: "must", must: true, done: false };
+    if (value + 1e-6 >= target) return line(`${name}已吃够`, "done", true);
+    return line(`${name}还差 ${left}${u}`, "must", false);
   }
-  if (value > target) return { name, text: `${name}已超 ${over}${u}`, tone: "over", must: false, done: false };
-  if (p >= 90) return { name, text: `${name}已到 ${p}%`, tone: "ok", must: false, done: false };
-  if (unit === "kcal") return { name, text: `${name}还可吃 ${left}${u}`, tone: "ok", must: false, done: false };
-  return { name, text: `${name}还可吃 ${left}${u}`, tone: "ok", must: false, done: false };
+  if (value > target) return line(`${name}已超 ${over}${u}`, "over", false);
+  if (p >= 90) return line(`${name}已到 ${p}%`, "ok", false);
+  return line(`${name}还可吃 ${left}${u}`, "ok", false);
 }
 
 export function fatLeftLabel(eaten: number, target: number): { text: string; tone: "ok" | "low" | "over"; left: number } {
@@ -127,6 +131,22 @@ export function fatLeftLabel(eaten: number, target: number): { text: string; ton
   const left = Math.max(0, r0(target - eaten));
   if (over > 0) return { text: `脂肪已超 ${over}g`, tone: "over", left: 0 };
   return { text: `脂肪还剩 ${left}g`, tone: left < 10 ? "low" : "ok", left };
+}
+
+export type HoldState = { phase: "idle" | "pending" | "holding"; open: boolean };
+export type HoldEvent = "down" | "hold" | "up" | "cancel" | "outside" | "toggle";
+
+export function holdPress(state: HoldState, event: HoldEvent): HoldState {
+  if (event === "down") return { phase: "pending", open: state.open };
+  if (event === "hold") return state.phase === "pending" ? { phase: "holding", open: true } : state;
+  if (event === "up") {
+    if (state.phase === "holding") return { phase: "idle", open: false };
+    if (state.phase === "pending") return { phase: "idle", open: !state.open };
+    return { phase: "idle", open: state.open };
+  }
+  if (event === "cancel") return { phase: "idle", open: state.phase === "holding" ? false : state.open };
+  if (event === "outside" || event === "toggle") return { phase: "idle", open: event === "toggle" ? !state.open : false };
+  return state;
 }
 
 export function carbWhy(tg: TodayTargets & { tdee: number }, train: boolean): string[] {
@@ -167,21 +187,20 @@ export function todayAnalysis(tot: Macros, tg: TodayTargets, train: boolean, hou
   const kcalTooLow = train && hour >= 16 && tot.k < tg.kcal - 400;
   const kcalLeft = tg.kcal - tot.k;
   const macroNeed = Math.max(0, tg.p - tot.p) * 4 + Math.max(0, tg.c - tot.c) * 4;
-  const lean = "用米饭、燕麦、红薯、土豆、香蕉这些少油主食，蛋白选鸡胸、鱼虾、蛋清";
-  let advice = train ? "按训练日高碳继续。热量是上限，不必吃满。" : "按休息日低碳继续。热量是上限，不必吃满。";
-  if (kcalOver) advice = "热量已超上限，后面清淡一点。";
-  else if (kcalTooLow) advice = "训练日热量明显不足，别吃太少。";
+  let advice = "下一餐照常，热量不必吃满";
+  if (kcalOver) advice = "下一餐清淡一点";
+  else if (kcalTooLow) advice = "别吃太少";
   else if (carbNeed && fatRatio >= 0.8) advice = fat.tone === "over"
-    ? `脂肪超了，碳水还可以吃，${lean}。${fat.text}，下一餐少油。`
-    : `碳水还要吃够，${lean}。${fat.text}，下一餐少油。`;
-  else if (fat.tone === "over" && proteinShort) advice = `脂肪已超标，后面少油；蛋白用乳清补一点。碳水还可以吃，换成少油的食物。`;
-  else if (fat.tone === "over") advice = "脂肪已超标，后面少油。碳水还可以吃，换成少油的食物。";
-  else if (fatHot) advice = `脂肪已接近目标，后面少油。${fat.text}，下一餐少油。`;
-  else if (kcalLeft < macroNeed) advice = `热量剩下的不够同时补满，先补蛋白，再补碳水，尽量不加脂肪。${fat.text}，下一餐少油。`;
-  else if (proteinShort && train && carbShort) advice = "蛋白还不够，建议补蛋白或乳清；训练前后再补碳。";
-  else if (proteinShort) advice = "蛋白还不够，建议补蛋白或乳清。";
-  else if (train && carbShort) advice = "训练日碳水不足，训练前后补碳。";
-  else if (kcalNear) advice = "热量已接近上限，后面清淡一点。";
+    ? `下一餐少油，碳水还可以吃，${fat.text}`
+    : `下一餐：多主食、少油，${fat.text}`;
+  else if (fat.tone === "over" && proteinShort) advice = "下一餐少油，补蛋白。碳水还可以吃";
+  else if (fat.tone === "over") advice = "下一餐少油。碳水还可以吃";
+  else if (fatHot) advice = `下一餐少油，${fat.text}`;
+  else if (kcalLeft < macroNeed) advice = `先补蛋白，再补碳水，不加脂肪。${fat.text}`;
+  else if (proteinShort && train && carbShort) advice = "下一餐：补蛋白，再补碳";
+  else if (proteinShort) advice = "下一餐：补蛋白";
+  else if (train && carbShort) advice = "下一餐：补碳";
+  else if (kcalNear) advice = "下一餐清淡一点";
   return { lines, summary, advice };
 }
 
