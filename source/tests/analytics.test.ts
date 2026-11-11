@@ -205,7 +205,7 @@ describe("carb cycle from the 2026-11-11 measurement", () => {
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v30", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v30"');
+  it("bumps the cache to ct-v31", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v31"');
   });
 });

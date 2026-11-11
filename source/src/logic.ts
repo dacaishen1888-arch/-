@@ -1,5 +1,5 @@
 export type Food = { n: string; k: number; p: number; c: number; f: number; g: number; u: string; t?: string; su?: string; mine?: boolean };
-export type Entry = { id: number; meal: string; name: string; grams: number; k: number; p: number; c: number; f: number };
+export type Entry = { id: number; meal: string; name: string; grams: number; k: number; p: number; c: number; f: number; qty?: number };
 export type Profile = {
   h: string; w: string; age: string; bf: string; act: string; def: string; wt?: string;
   bmr?: string;
@@ -96,29 +96,38 @@ export function needsTrainCarb(train: boolean, meal: string, carbs: number): boo
   return train && (meal === "早餐" || meal === "训练后") && carbs < 40;
 }
 
-export type GapTone = "ok" | "low" | "near" | "over";
-export type GapLine = { name: string; text: string; tone: GapTone };
+export type GapTone = "ok" | "low" | "near" | "over" | "must" | "done";
+export type GapLine = { name: string; text: string; tone: GapTone; must: boolean; done: boolean };
 export type TodayTargets = { kcal: number; p: number; c: number; f: number };
+
+export function isMustReach(name: string, train: boolean): boolean {
+  if (name === "蛋白") return true;
+  return name === "碳水" && train;
+}
 
 function macroPct(v: number, t: number): number { return t > 0 ? Math.round(v / t * 100) : 0; }
 
-function gapLine(name: string, unit: string, value: number, target: number, kind: "ceiling" | "fill"): GapLine {
+function gapLine(name: string, unit: string, value: number, target: number, must: boolean): GapLine {
   const left = Math.max(0, r0(target - value));
   const over = Math.max(0, r0(value - target));
   const p = macroPct(value, target);
   const u = unit === "kcal" ? " kcal" : unit;
-  if (value > target) return { name, text: `${name}已超 ${over}${u}`, tone: "over" };
-  if (kind === "ceiling") return { name, text: `${name}还可吃 ${left}${u}`, tone: p >= 90 ? "near" : "ok" };
-  if (p >= 90) return { name, text: `${name}已到 ${p}%`, tone: "near" };
-  return { name, text: `${name}还差 ${left}${u}`, tone: "low" };
+  if (must) {
+    if (value + 1e-6 >= target) return { name, text: `${name}已吃够`, tone: "done", must: true, done: true };
+    return { name, text: `${name}还差 ${left}${u}`, tone: "must", must: true, done: false };
+  }
+  if (value > target) return { name, text: `${name}已超 ${over}${u}`, tone: "over", must: false, done: false };
+  if (p >= 90) return { name, text: `${name}已到 ${p}%`, tone: "ok", must: false, done: false };
+  if (unit === "kcal") return { name, text: `${name}还可吃 ${left}${u}`, tone: "ok", must: false, done: false };
+  return { name, text: `${name}还可吃 ${left}${u}`, tone: "ok", must: false, done: false };
 }
 
 export function todayAnalysis(tot: Macros, tg: TodayTargets, train: boolean, hour = 12): { lines: GapLine[]; summary: string; advice: string } {
   const lines = [
-    gapLine("热量", "kcal", tot.k, tg.kcal, "ceiling"),
-    gapLine("蛋白", "g", tot.p, tg.p, "fill"),
-    gapLine("碳水", "g", tot.c, tg.c, "fill"),
-    gapLine("脂肪", "g", tot.f, tg.f, "fill"),
+    gapLine("热量", "kcal", tot.k, tg.kcal, false),
+    gapLine("蛋白", "g", tot.p, tg.p, true),
+    gapLine("碳水", "g", tot.c, tg.c, isMustReach("碳水", train)),
+    gapLine("脂肪", "g", tot.f, tg.f, false),
   ];
   const summary = lines.map((l) => l.text).join(" · ");
   const proteinShort = tg.p - tot.p >= 20;
@@ -191,6 +200,31 @@ export function sumEntries(es: readonly { k: number; p: number; c: number; f: nu
     c: a.c + (Number(e.c) || 0),
     f: a.f + (Number(e.f) || 0),
   }), { k: 0, p: 0, c: 0, f: 0 });
+}
+
+export const QTY_CHIPS = [0.5, 1, 1.5, 2, 3];
+
+export function formatQty(q: number): string {
+  const n = Math.round(q * 10) / 10;
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+export function clampQty(q: number): number {
+  const stepped = Math.round(q * 2) / 2;
+  return Math.min(10, Math.max(0.5, stepped));
+}
+
+export function applyQty<T extends { name: string; grams: number; k: number; p: number; c: number; f: number; qty?: number }>(e: T, qty: number): T {
+  const q = clampQty(qty);
+  const prev = e.qty && e.qty > 0 ? e.qty : 1;
+  const m = q / prev;
+  const base = e.name.replace(/\s*×[\d.]+$/, "");
+  return { ...e, qty: q, name: `${base} ×${formatQty(q)}`, k: e.k * m, p: e.p * m, c: e.c * m, f: e.f * m, grams: e.grams ? Math.round(e.grams * m * 10) / 10 : 0 };
+}
+
+export function entryFromSupplement(it: { n: string; k: number; p: number; c: number; f: number }, qty: number): { meal: string; name: string; grams: number; k: number; p: number; c: number; f: number; qty: number } {
+  const q = clampQty(qty);
+  return { meal: "加餐", name: `${it.n} ×${formatQty(q)}`, grams: 0, k: it.k * q, p: it.p * q, c: it.c * q, f: it.f * q, qty: q };
 }
 
 export function entryFromFood(f: Food, grams: number, meal: string): Omit<Entry, "id"> {
