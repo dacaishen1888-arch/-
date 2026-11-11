@@ -96,6 +96,94 @@ export function needsTrainCarb(train: boolean, meal: string, carbs: number): boo
   return train && (meal === "早餐" || meal === "训练后") && carbs < 40;
 }
 
+export type GapTone = "ok" | "low" | "near" | "over";
+export type GapLine = { name: string; text: string; tone: GapTone };
+export type TodayTargets = { kcal: number; p: number; c: number; f: number };
+
+function macroPct(v: number, t: number): number { return t > 0 ? Math.round(v / t * 100) : 0; }
+
+function gapLine(name: string, unit: string, value: number, target: number, kind: "ceiling" | "fill"): GapLine {
+  const left = Math.max(0, r0(target - value));
+  const over = Math.max(0, r0(value - target));
+  const p = macroPct(value, target);
+  const u = unit === "kcal" ? " kcal" : unit;
+  if (value > target) return { name, text: `${name}已超 ${over}${u}`, tone: "over" };
+  if (kind === "ceiling") return { name, text: `${name}还可吃 ${left}${u}`, tone: p >= 90 ? "near" : "ok" };
+  if (p >= 90) return { name, text: `${name}已到 ${p}%`, tone: "near" };
+  return { name, text: `${name}还差 ${left}${u}`, tone: "low" };
+}
+
+export function todayAnalysis(tot: Macros, tg: TodayTargets, train: boolean, hour = 12): { lines: GapLine[]; summary: string; advice: string } {
+  const lines = [
+    gapLine("热量", "kcal", tot.k, tg.kcal, "ceiling"),
+    gapLine("蛋白", "g", tot.p, tg.p, "fill"),
+    gapLine("碳水", "g", tot.c, tg.c, "fill"),
+    gapLine("脂肪", "g", tot.f, tg.f, "fill"),
+  ];
+  const summary = lines.map((l) => l.text).join(" · ");
+  const proteinShort = tg.p - tot.p >= 20;
+  const carbShort = tg.c - tot.c >= 40;
+  const fatHot = tot.f >= tg.f * 0.9;
+  const kcalOver = tot.k > tg.kcal;
+  const kcalNear = !kcalOver && tot.k >= tg.kcal * 0.9;
+  const kcalTooLow = train && hour >= 16 && tot.k < tg.kcal - 400;
+  let advice = train ? "按训练日高碳继续。热量是上限，不必吃满。" : "按休息日低碳继续。热量是上限，不必吃满。";
+  if (kcalOver) advice = "热量已超上限，后面清淡一点。";
+  else if (kcalTooLow) advice = "训练日热量明显不足，别吃太少。";
+  else if (fatHot && tot.f > tg.f && proteinShort) advice = "脂肪已超标，后面少油；蛋白用乳清补一点。";
+  else if (fatHot && tot.f > tg.f) advice = "脂肪已超标，后面少油。";
+  else if (fatHot) advice = "脂肪已接近目标，后面少油。";
+  else if (proteinShort && train && carbShort) advice = "蛋白还不够，建议补蛋白或乳清；训练前后再补碳。";
+  else if (proteinShort) advice = "蛋白还不够，建议补蛋白或乳清。";
+  else if (train && carbShort) advice = "训练日碳水不足，训练前后补碳。";
+  else if (kcalNear) advice = "热量已接近上限，后面清淡一点。";
+  return { lines, summary, advice };
+}
+
+export type ReminderId = "pre-carb" | "post-train" | "evening-protein" | "fat-over";
+export type Reminder = { id: ReminderId; text: string };
+
+export function shanghaiClock(now: Date): { h: number; m: number } {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return { h: h === 24 ? 0 : h, m };
+}
+
+export function dueReminders(input: { h: number; m: number; train: boolean; meals: readonly string[]; breakfastCarbs: number | null; tot: Macros; tg: TodayTargets }): Reminder[] {
+  const mins = input.h * 60 + input.m;
+  const out: Reminder[] = [];
+  if (input.tot.f > input.tg.f) out.push({ id: "fat-over", text: "脂肪已经超了，后面控油。" });
+  if (mins >= 19 * 60 && input.tg.p - input.tot.p >= 30) out.push({ id: "evening-protein", text: "晚上了，蛋白还差不少，补一份蛋白或乳清。" });
+  if (input.train && mins >= 10 * 60 + 20 && !input.meals.includes("训练后")) out.push({ id: "post-train", text: "训练后还没记，补蛋白和碳水。" });
+  if (input.train && mins >= 5 * 60 && mins < 10 * 60 + 20 && (input.breakfastCarbs == null || input.breakfastCarbs < 40)) out.push({ id: "pre-carb", text: "训练前先吃碳水，大约 40–60g。" });
+  return out;
+}
+
+export function pickReminder(due: readonly Reminder[], seen: readonly string[]): Reminder | null {
+  return due.find((r) => !seen.includes(r.id)) ?? null;
+}
+
+export type ReminderStore = { getItem(key: string): string | null; setItem(key: string, value: string): void };
+
+export function seenReminders(date: string, kv: ReminderStore): string[] {
+  try {
+    const all = JSON.parse(kv.getItem("fl_remind_seen") || "{}") as Record<string, unknown>;
+    const day = all[date];
+    return Array.isArray(day) ? day.filter((x): x is string => typeof x === "string") : [];
+  } catch { return []; }
+}
+
+export function markReminderSeen(date: string, id: string, kv: ReminderStore): void {
+  let all: Record<string, string[]> = {};
+  try { all = JSON.parse(kv.getItem("fl_remind_seen") || "{}"); } catch { all = {}; }
+  const day = new Set([...(Array.isArray(all[date]) ? all[date] : []), id]);
+  all[date] = [...day];
+  const dates = Object.keys(all).sort();
+  while (dates.length > 21) { const drop = dates.shift(); if (drop) delete all[drop]; }
+  kv.setItem("fl_remind_seen", JSON.stringify(all));
+}
+
 export function sumEntries(es: readonly { k: number; p: number; c: number; f: number }[]): Macros {
   return es.reduce((a, e) => ({
     k: a.k + (Number(e.k) || 0),
