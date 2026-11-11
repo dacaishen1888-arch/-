@@ -161,6 +161,7 @@ export function WeekBars({ days }: { days: { label: string; sub: string; kcal: n
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="近7天每日热量和当日目标">
         {ticks.map((v, i) => <g key={i}><line x1={pl} x2={W - pr} y1={y(v)} y2={y(v)} stroke="#2c2c2e" /><text x={pl - 4} y={y(v) + 3} fontSize="10" textAnchor="end" fill="#8e8e93">{Math.round(v)}</text></g>)}
+        {days.length > 0 && <path d={days.map((d, i) => { const cx = pl + i * slot + slot / 2; const yy = y(d.target); const half = slot * 0.42; if (i === 0) return `M ${cx - half} ${yy} H ${cx + half}`; const prev = y(days[i - 1].target); const mid = pl + (i - 0.5) * slot + slot / 2; return `M ${mid} ${prev} V ${yy} H ${cx + half}`; }).join(" ")} fill="none" stroke="#fff" strokeWidth="1.6" strokeLinejoin="round" />}
         {days.map((d, i) => {
           const x = pl + i * slot + slot * 0.18;
           const bw = slot * 0.64;

@@ -204,8 +204,44 @@ describe("carb cycle from the 2026-11-11 measurement", () => {
   });
 });
 
+describe("carb-cycle analytics", () => {
+  const pr = PROFILE_DEFAULT;
+  const train = calcTargets(pr, true);
+  const rest = calcTargets(pr, false);
+  const food = (id: number, k: number, p: number, c: number, f: number): Entry => ({ id, meal: "午餐", name: "a", grams: 100, k, p, c, f });
+  it("uses each day's own target and excludes unlogged days from averages and must-reach counts", () => {
+    expect(train.kcal).not.toBe(rest.kcal);
+    const w = analyzeWindow({
+      "2026-11-05": [food(1, train.kcal, train.p - 10, train.c - 10, 10)],
+      "2026-11-06": [food(2, train.kcal, train.p, train.c, train.f)],
+      "2026-11-07": [food(3, rest.kcal - 100, rest.p, rest.c - 30, 10)],
+    }, "2026-11-08", pr);
+    const by = (iso: string) => w.days.find((d) => d.date === iso)!;
+    expect(by("2026-11-06").train).toBe(true);
+    expect(by("2026-11-06").targetK).toBe(train.kcal);
+    expect(by("2026-11-06").targetC).toBe(train.c);
+    expect(by("2026-11-07").train).toBe(false);
+    expect(by("2026-11-07").targetK).toBe(rest.kcal);
+    expect(by("2026-11-07").targetC).toBe(rest.c);
+    expect(by("2026-11-06").adherence).toBe(100);
+    expect(by("2026-11-08").status).toBe("未记录");
+    expect(w.proteinDays).toBe(3);
+    expect(w.proteinReached).toBe(2);
+    expect(w.trainLogged).toBe(2);
+    expect(w.trainCarbReached).toBe(1);
+    expect(w.trainAvg.days).toBe(2);
+    expect(w.trainAvg.targetK).toBe(train.kcal);
+    expect(w.restAvg.days).toBe(1);
+    expect(w.restAvg.k).toBe(rest.kcal - 100);
+    expect(w.restAvg.targetK).toBe(rest.kcal);
+    expect(w.unlogged).toBe(4);
+    const deficit = r0(((train.tdee - train.kcal) + (train.tdee - train.kcal) + (rest.tdee - (rest.kcal - 100))) / 3);
+    expect(w.avgDeficit).toBe(deficit);
+  });
+});
+
 describe("service worker", () => {
-  it("bumps the cache to ct-v31", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v31"');
+  it("bumps the cache to ct-v32", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v32"');
   });
 });

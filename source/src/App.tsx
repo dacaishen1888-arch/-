@@ -1051,6 +1051,11 @@ function Ring({ label, v, t, unit }: { label: string; v: number; t: number; unit
   );
 }
 
+function GroupAvg({ title, g }: { title: string; g: { days: number; k: number; p: number; c: number; f: number; targetK: number; targetP: number; targetC: number; targetF: number; adherence: number } }) {
+  if (!g.days) return <p className="ct-note">{`没有已记录的${title}。`}</p>;
+  return <div className="ct-group" data-testid={`avg-${title}`}><b>{`${title}均 · ${g.days} 天 · 热量 ${g.adherence}%`}</b><p className="ct-note">{`热量 ${g.k}/${g.targetK} kcal · 蛋白 ${g.p}/${g.targetP} g · 碳水 ${g.c}/${g.targetC} g · 脂肪 ${g.f}/${g.targetF} g`}</p></div>;
+}
+
 function QtyPicker({ value, onChange, label }: { value: number; onChange: (n: number) => void; label: string }) {
   return (
     <div className="ct-qty" data-testid={`qty-${label}`}>
@@ -1577,12 +1582,14 @@ export default function App() {
         <div className="ct-chead"><h2 className="ct-ctitle">{`近7天 · ${ana.days[0] ? `${Number(ana.days[0].date.slice(5, 7))}月${Number(ana.days[0].date.slice(8))}日` : ""} 至 ${Number(date.slice(5, 7))}月${Number(date.slice(8))}日`}</h2></div>
         <p className="ct-note">每一天只和自己的目标比，规则与今日圆环相同：实际热量高于目标才算超出。未记录不计入超标，也不算成没吃够。没有当天保存的目标时，按当前碳循环重算：训练日高碳，休息日低碳。</p>
         <div className="ct-metrics">
+          <div className={`ct-metric ${ana.proteinDays > 0 && ana.proteinReached === ana.proteinDays ? "ct-hit" : "ct-need"}`} data-testid="protein-reach"><span>蛋白吃够</span><b>{ana.proteinReached}<small style={{ fontSize: 14, color: "#8e8e93" }}>{`/${ana.proteinDays} 天`}</small></b></div>
+          <div className={`ct-metric ${ana.trainLogged > 0 && ana.trainCarbReached === ana.trainLogged ? "ct-hit" : "ct-need"}`} data-testid="carb-reach"><span>训练日碳水吃够</span><b>{ana.trainCarbReached}<small style={{ fontSize: 14, color: "#8e8e93" }}>{`/${ana.trainLogged} 天`}</small></b></div>
           <div className="ct-metric"><span>已记录</span><b>{loggedN}<small style={{ fontSize: 14, color: "#8e8e93" }}>/7 天</small></b></div>
-          <div className="ct-metric"><span>已记录日均热量</span><b>{loggedN ? ana.avgKLogged : "—"}<small style={{ fontSize: 14, color: "#8e8e93" }}> kcal</small></b></div>
-          <div className="ct-metric"><span>未超标</span><b>{ana.withinCount}<small style={{ fontSize: 14, color: "#8e8e93" }}>{` / ${loggedN || 0} 天`}</small></b></div>
-          <div className="ct-metric"><span>超出</span><b style={{ color: ana.overCount ? "#ff453a" : "#fff" }}>{ana.overCount}<small style={{ fontSize: 14, color: "#8e8e93" }}>{` / ${loggedN || 0} 天`}</small></b></div>
+          <div className="ct-metric"><span>日均缺口</span><b>{loggedN ? ana.avgDeficit : "—"}<small style={{ fontSize: 14, color: "#8e8e93" }}> kcal</small></b></div>
         </div>
-        <p className="ct-note">{`训练日目标 ${tgT.kcal} kcal，休息日目标 ${tgR.kcal} kcal，都是当前参数。蛋白每日 ${tg.p} g。未记录若按 0 计入，7 日平均是 ${ana.avgKAll} kcal，那不是某一天的成绩。`}</p>
+        <p className="ct-note">缺口是当天消耗估算减去实际摄入，只算已记录的日子。训练日和休息日各用自己的目标，白线按天阶梯变化。未记录不进平均，也不算没吃够。</p>
+        <GroupAvg title="训练日" g={ana.trainAvg} />
+        <GroupAvg title="休息日" g={ana.restAvg} />
         <WeekBars days={ana.days.map((d) => ({ label: `${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))}`, sub: d.train ? "训练" : "休息", kcal: d.status === "未记录" ? null : d.shownK, target: d.targetK, status: d.status }))} />
         <div className="ct-days">
           {ana.days.map((d) => {
@@ -1593,12 +1600,13 @@ export default function App() {
               {d.status === "未记录" ? <p className="ct-note">没有饮食记录。不和目标比较，也不算未达标。</p> : <Fragment>
                 <div className="ct-day-k">{d.shownK}<small>kcal</small></div>
                 <p className="ct-note">{`目标 ${d.targetK} kcal · ${d.targetSource === "saved" ? "当天保存的目标" : "按当前参数重算"} · ${d.status === "超出" ? `超出 ${d.gap}` : `还剩 ${d.gap}`}`}</p>
-                <p className="ct-note">{`蛋白 ${r0(d.p)} / ${d.targetP} g · 碳水 ${r0(d.c)} / ${d.targetC} g · 脂肪 ${r0(d.f)} / ${d.targetF} g`}</p>
+                <p className="ct-note">{`相对当天目标 ${d.adherence}%`}</p>
+                <p className="ct-note"><span className={d.p >= d.targetP ? "ct-done" : "ct-must"}>{`蛋白 ${r0(d.p)}/${d.targetP}g ${d.p >= d.targetP ? "已吃够" : "必须吃够"}`}</span>{d.train ? <span className={d.c >= d.targetC ? "ct-done" : "ct-must"}>{` · 碳水 ${r0(d.c)}/${d.targetC}g ${d.c >= d.targetC ? "已吃够" : "必须吃够"}`}</span> : ` · 碳水 ${r0(d.c)}/${d.targetC}g 上限`}{` · 脂肪 ${r0(d.f)}/${d.targetF}g 上限`}</p>
               </Fragment>}
             </div>;
           })}
         </div>
-        <p className="ct-note">{loggedN ? `已记录日蛋白达到目标 95% 的有 ${ana.pHitLogged} / ${loggedN} 天。未记录的日子不在这 ${loggedN} 天里。` : "这 7 天还没有饮食记录。"}</p>
+        <p className="ct-note">{loggedN ? `未记录 ${ana.unlogged} 天，不计入吃够天数和日均。` : "这 7 天还没有饮食记录。"}</p>
       </div></Fragment>
       )}
 
@@ -1837,6 +1845,12 @@ button:active,.ct-row:active{transform:scale(.97);opacity:.85}
 .ct-gap.over b{color:#ff453a}
 .ct-gap.near b{color:#ffb020}
 .ct-gap.low b,.ct-gap.ok b{color:#f2f3f5;font-weight:600}
+.ct-need b{color:#ff9f0a}
+.ct-hit b{color:#30d158}
+.ct-group{background:#2c2c2e;border-radius:16px;padding:12px 14px;margin:0 0 8px}
+.ct-group b{color:#fff;font-size:14px}
+.ct-must{color:#ff9f0a;font-weight:800}
+.ct-done{color:#30d158;font-weight:800}
 .ct-gap.must{box-shadow:inset 0 0 0 1.5px rgba(255,159,10,.85)}
 .ct-gap.must b{color:#ff9f0a;font-weight:800}
 .ct-gap.done{box-shadow:inset 0 0 0 1.5px rgba(48,209,88,.7)}

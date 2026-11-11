@@ -265,10 +265,14 @@ export type DayStat = Macros & {
   targetC: number;
   targetF: number;
   targetSource: "saved" | "recalculated";
+  tdee: number;
   status: HeatStatus;
   shownK: number;
   gap: number;
+  adherence: number;
 };
+
+export type GroupAvg = { days: number; k: number; p: number; c: number; f: number; targetK: number; targetP: number; targetC: number; targetF: number; adherence: number };
 
 export type WindowStats = {
   days: DayStat[];
@@ -285,6 +289,13 @@ export type WindowStats = {
   avgPAll: number;
   avgTargetKLogged: number;
   pHitLogged: number;
+  proteinReached: number;
+  proteinDays: number;
+  trainCarbReached: number;
+  trainLogged: number;
+  trainAvg: GroupAvg;
+  restAvg: GroupAvg;
+  avgDeficit: number;
 };
 
 export function heatStatus(kcal: number, target: number, entries: number): HeatStatus {
@@ -299,9 +310,14 @@ export function savedDayTarget(raw: Partial<SavedDayTarget> | undefined): SavedD
   return { kcal: raw.kcal as number, p: raw.p as number, c: raw.c as number, f: raw.f as number };
 }
 
-function avgOf(rows: readonly DayStat[], key: keyof Macros | "targetK"): number {
+function avgOf(rows: readonly DayStat[], key: keyof Macros | "targetK" | "targetP" | "targetC" | "targetF" | "tdee"): number {
   if (!rows.length) return 0;
   return r0(rows.reduce((a, d) => a + d[key], 0) / rows.length);
+}
+
+function groupAvg(rows: readonly DayStat[]): GroupAvg {
+  const adherence = rows.length ? r0(rows.reduce((a, d) => a + d.adherence, 0) / rows.length) : 0;
+  return { days: rows.length, k: avgOf(rows, "k"), p: avgOf(rows, "p"), c: avgOf(rows, "c"), f: avgOf(rows, "f"), targetK: avgOf(rows, "targetK"), targetP: avgOf(rows, "targetP"), targetC: avgOf(rows, "targetC"), targetF: avgOf(rows, "targetF"), adherence };
 }
 
 export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>, end: string, profile: Profile, saved?: Record<string, Partial<SavedDayTarget> | undefined>): WindowStats {
@@ -317,9 +333,12 @@ export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>,
     const targetF = keep ? keep.f : recalc.f;
     const entries = es.length;
     const status = heatStatus(s.k, targetK, entries);
-    return { date, ...s, entries, train, targetK, targetP, targetC, targetF, targetSource: keep ? "saved" : "recalculated", status, shownK: Math.round(s.k), gap: Math.round(Math.abs(targetK - s.k)) };
+    const adherence = entries > 0 && targetK > 0 ? Math.round(s.k / targetK * 100) : 0;
+    return { date, ...s, entries, train, targetK, targetP, targetC, targetF, targetSource: keep ? "saved" : "recalculated", tdee: recalc.tdee, status, shownK: Math.round(s.k), gap: Math.round(Math.abs(targetK - s.k)), adherence };
   });
   const logged = days.filter((d) => d.entries > 0);
+  const trainLogged = logged.filter((d) => d.train);
+  const restLogged = logged.filter((d) => !d.train);
   return {
     days,
     logged,
@@ -335,6 +354,13 @@ export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>,
     avgPAll: avgOf(days, "p"),
     avgTargetKLogged: avgOf(logged, "targetK"),
     pHitLogged: logged.filter((d) => d.p >= d.targetP * 0.95).length,
+    proteinReached: logged.filter((d) => d.p >= d.targetP).length,
+    proteinDays: logged.length,
+    trainCarbReached: trainLogged.filter((d) => d.c >= d.targetC).length,
+    trainLogged: trainLogged.length,
+    trainAvg: groupAvg(trainLogged),
+    restAvg: groupAvg(restLogged),
+    avgDeficit: avgOf(logged.map((d) => ({ ...d, k: d.tdee - d.k })), "k"),
   };
 }
 
