@@ -5,6 +5,7 @@ export type Profile = {
   bmr?: string;
   tk?: string; tp?: string; tc?: string; tf?: string;
   rk?: string; rp?: string; rc?: string; rf?: string;
+  pLo?: string; pHi?: string;
 };
 export const PROFILE_DEFAULT: Profile = { h: "170", w: "80.1", age: "34", bf: "17.7", bmr: "1795", act: "1.6", def: "18" };
 export type Body = { date: string; w: number; waist: number };
@@ -72,28 +73,40 @@ export function calcTargets(pr: Profile, train: boolean) {
   const { bmr, source, lbm } = bmrOf(pr);
   const base = parseFloat(pr.act) || 1.55;
   const mult = train ? base : Math.max(1.2, base - 0.3);
-  const hasBf = lbm < w - 0.05;
-  const p0 = r0(hasBf ? lbm * 2.64 : w * 2.06);
+  let pMin = opt(pr.pLo, 160);
+  let pMax = opt(pr.pHi, 175);
+  if (pMax < pMin) { const swap = pMin; pMin = pMax; pMax = swap; }
+  const pRef = 174;
   const c0 = r0(w * (train ? 3 : 1.5));
   const f0 = r0(w * (train ? 0.637 : 0.762));
-  const p = opt(train ? pr.tp : pr.rp, p0);
   const c = opt(train ? pr.tc : pr.rc, c0);
   const f = opt(train ? pr.tf : pr.rf, f0);
-  const kcal = opt(train ? pr.tk : pr.rk, r0(p * 4 + c * 4 + f * 9));
-  return { bmr: r0(bmr), bmrSource: source, lbm: Math.round(lbm * 10) / 10, tdee: r0(bmr * mult), kcal, p, c, f };
+  const kcal = opt(train ? pr.tk : pr.rk, r0(pRef * 4 + c * 4 + f * 9));
+  return { bmr: r0(bmr), bmrSource: source, lbm: Math.round(lbm * 10) / 10, tdee: r0(bmr * mult), kcal, p: pMin, pMin, pMax, pRef, c, f };
 }
 
-const OLD_AUTO: Record<"tp" | "rp" | "tf" | "rf", [number, number]> = { tp: [165, 174], rp: [165, 174], tf: [55, 51], rf: [65, 61] };
+function storedNum(raw: string | undefined): number | null {
+  if (raw == null || String(raw).trim() === "") return null;
+  const n = parseFloat(String(raw));
+  return isFinite(n) ? n : null;
+}
 
 export function migrateProteinTargets(pr: Profile): Profile {
   const next: Profile = { ...pr };
-  (Object.keys(OLD_AUTO) as (keyof typeof OLD_AUTO)[]).forEach((key) => {
-    const raw = pr[key];
-    if (raw == null || String(raw).trim() === "") return;
-    const n = parseFloat(String(raw));
-    const [from, to] = OLD_AUTO[key];
-    if (n === from) next[key] = String(to);
-  });
+  if (storedNum(pr.tf) === 55) next.tf = "51";
+  if (storedNum(pr.rf) === 65) next.rf = "61";
+  const autoP = (n: number | null) => n === 165 || n === 174;
+  const tp = storedNum(pr.tp);
+  const rp = storedNum(pr.rp);
+  if (autoP(tp)) next.tp = "";
+  if (autoP(rp)) next.rp = "";
+  const genuine = [tp, rp].filter((n): n is number => n != null && !autoP(n));
+  if (genuine.length && storedNum(pr.pLo) == null && storedNum(pr.pHi) == null) {
+    next.pLo = String(Math.min(...genuine));
+    next.pHi = String(Math.max(...genuine));
+    next.tp = "";
+    next.rp = "";
+  }
   return next;
 }
 
@@ -112,7 +125,7 @@ export function needsTrainCarb(train: boolean, meal: string, carbs: number): boo
 
 export type GapTone = "ok" | "low" | "near" | "over" | "must" | "done";
 export type GapLine = { name: string; text: string; chip: string; tone: GapTone; must: boolean; done: boolean };
-export type TodayTargets = { kcal: number; p: number; c: number; f: number };
+export type TodayTargets = { kcal: number; p: number; pMin: number; pMax: number; pRef: number; c: number; f: number };
 
 export function isMustReach(name: string, train: boolean): boolean {
   if (name === "蛋白") return true;
@@ -123,6 +136,22 @@ function macroPct(v: number, t: number): number { return t > 0 ? Math.round(v / 
 
 function chipOf(text: string): string {
   return text.replace(/^(热量|蛋白|碳水|脂肪)/, "").replace(/\s/g, "").replace(/kcal/g, "");
+}
+
+function proteinLine(value: number, min: number, max: number): GapLine {
+  if (value + 1e-6 < min) {
+    const left = Math.max(0, r0(min - value));
+    return { name: "蛋白", text: `蛋白还差 ${left}g 到下限`, chip: `还差${left}g`, tone: "must", must: true, done: false };
+  }
+  if (value > max) {
+    const over = Math.max(0, r0(value - max));
+    return { name: "蛋白", text: `蛋白略超 ${over}g`, chip: `略超${over}g`, tone: "near", must: true, done: true };
+  }
+  return { name: "蛋白", text: "蛋白已吃够", chip: "已吃够", tone: "done", must: true, done: true };
+}
+
+export function proteinBand(min: number, max: number): string {
+  return max > min ? `${min}–${max}` : String(min);
 }
 
 function gapLine(name: string, unit: string, value: number, target: number, must: boolean): GapLine {
@@ -164,12 +193,13 @@ export function holdPress(state: HoldState, event: HoldEvent): HoldState {
 }
 
 export function carbWhy(tg: TodayTargets & { tdee: number }, train: boolean): string[] {
-  const sum = r0(tg.p * 4 + tg.c * 4 + tg.f * 9);
+  const sum = r0(tg.pRef * 4 + tg.c * 4 + tg.f * 9);
   const kind = train ? "训练日" : "休息日";
   const gap = r0(tg.tdee - tg.kcal);
+  const range = `蛋白每天 ${proteinBand(tg.pMin, tg.pMax)}g，到 ${tg.pMin}g 就算吃够，${tg.pMax}g 以内都可以。`;
   const budget = sum === tg.kcal
-    ? `热量已经算好：${kind} 蛋白${tg.p}g×4 + 碳水${tg.c}g×4 + 脂肪${tg.f}g×9 = ${sum} kcal，脂肪守住、碳水吃够，热量刚好在线。`
-    : `热量已经算好：${kind} 蛋白${tg.p}g×4 + 碳水${tg.c}g×4 + 脂肪${tg.f}g×9 = ${sum} kcal，当天热量目标 ${tg.kcal} kcal。脂肪守住、碳水吃够，就按这条线走。`;
+    ? `热量已经算好：${kind} 蛋白${tg.pRef}g×4 + 碳水${tg.c}g×4 + 脂肪${tg.f}g×9 = ${sum} kcal。${range}脂肪守住、碳水吃够，热量刚好在线。`
+    : `热量已经算好：${kind} 蛋白${tg.pRef}g×4 + 碳水${tg.c}g×4 + 脂肪${tg.f}g×9 = ${sum} kcal，当天热量目标 ${tg.kcal} kcal。${range}`;
   const room = gap > 0
     ? `目标本身低于消耗约 ${gap} kcal，偶尔多一两百 kcal 仍在缺口里。热量容易超的是油和零食，不是主食。`
     : "热量容易超的是油和零食，不是主食。";
@@ -185,12 +215,12 @@ export function carbWhy(tg: TodayTargets & { tdee: number }, train: boolean): st
 export function todayAnalysis(tot: Macros, tg: TodayTargets, train: boolean, hour = 12): { lines: GapLine[]; summary: string; advice: string } {
   const lines = [
     gapLine("热量", "kcal", tot.k, tg.kcal, false),
-    gapLine("蛋白", "g", tot.p, tg.p, true),
+    proteinLine(tot.p, tg.pMin, tg.pMax),
     gapLine("碳水", "g", tot.c, tg.c, isMustReach("碳水", train)),
     gapLine("脂肪", "g", tot.f, tg.f, false),
   ];
   const summary = lines.map((l) => l.text).join(" · ");
-  const proteinShort = tg.p - tot.p >= 20;
+  const proteinShort = tg.pMin - tot.p >= 20;
   const carbShort = tg.c - tot.c >= 40;
   const carbNeed = train && tot.c + 1e-6 < tg.c;
   const fat = fatLeftLabel(tot.f, tg.f);
@@ -200,7 +230,7 @@ export function todayAnalysis(tot: Macros, tg: TodayTargets, train: boolean, hou
   const kcalNear = !kcalOver && tot.k >= tg.kcal * 0.9;
   const kcalTooLow = train && hour >= 16 && tot.k < tg.kcal - 400;
   const kcalLeft = tg.kcal - tot.k;
-  const macroNeed = Math.max(0, tg.p - tot.p) * 4 + Math.max(0, tg.c - tot.c) * 4;
+  const macroNeed = Math.max(0, tg.pMin - tot.p) * 4 + Math.max(0, tg.c - tot.c) * 4;
   let advice = "下一餐照常，热量不必吃满";
   if (kcalOver) advice = "下一餐清淡一点";
   else if (kcalTooLow) advice = "别吃太少";
@@ -331,6 +361,8 @@ export type DayStat = Macros & {
   train: boolean;
   targetK: number;
   targetP: number;
+  targetPMin: number;
+  targetPMax: number;
   targetC: number;
   targetF: number;
   targetSource: "saved" | "recalculated";
@@ -341,7 +373,7 @@ export type DayStat = Macros & {
   adherence: number;
 };
 
-export type GroupAvg = { days: number; k: number; p: number; c: number; f: number; targetK: number; targetP: number; targetC: number; targetF: number; adherence: number };
+export type GroupAvg = { days: number; k: number; p: number; c: number; f: number; targetK: number; targetP: number; targetPMax: number; targetC: number; targetF: number; adherence: number };
 
 export type WindowStats = {
   days: DayStat[];
@@ -379,14 +411,14 @@ export function savedDayTarget(raw: Partial<SavedDayTarget> | undefined): SavedD
   return { kcal: raw.kcal as number, p: raw.p as number, c: raw.c as number, f: raw.f as number };
 }
 
-function avgOf(rows: readonly DayStat[], key: keyof Macros | "targetK" | "targetP" | "targetC" | "targetF" | "tdee"): number {
+function avgOf(rows: readonly DayStat[], key: keyof Macros | "targetK" | "targetP" | "targetPMax" | "targetC" | "targetF" | "tdee"): number {
   if (!rows.length) return 0;
   return r0(rows.reduce((a, d) => a + d[key], 0) / rows.length);
 }
 
 function groupAvg(rows: readonly DayStat[]): GroupAvg {
   const adherence = rows.length ? r0(rows.reduce((a, d) => a + d.adherence, 0) / rows.length) : 0;
-  return { days: rows.length, k: avgOf(rows, "k"), p: avgOf(rows, "p"), c: avgOf(rows, "c"), f: avgOf(rows, "f"), targetK: avgOf(rows, "targetK"), targetP: avgOf(rows, "targetP"), targetC: avgOf(rows, "targetC"), targetF: avgOf(rows, "targetF"), adherence };
+  return { days: rows.length, k: avgOf(rows, "k"), p: avgOf(rows, "p"), c: avgOf(rows, "c"), f: avgOf(rows, "f"), targetK: avgOf(rows, "targetK"), targetP: avgOf(rows, "targetP"), targetPMax: avgOf(rows, "targetPMax"), targetC: avgOf(rows, "targetC"), targetF: avgOf(rows, "targetF"), adherence };
 }
 
 export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>, end: string, profile: Profile, saved?: Record<string, Partial<SavedDayTarget> | undefined>): WindowStats {
@@ -397,13 +429,15 @@ export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>,
     const recalc = calcTargets(profile, train);
     const keep = savedDayTarget(saved?.[date]);
     const targetK = keep ? keep.kcal : recalc.kcal;
-    const targetP = keep ? keep.p : recalc.p;
+    const targetPMin = keep ? keep.p : recalc.pMin;
+    const targetPMax = keep ? keep.p : recalc.pMax;
+    const targetP = targetPMin;
     const targetC = keep ? keep.c : recalc.c;
     const targetF = keep ? keep.f : recalc.f;
     const entries = es.length;
     const status = heatStatus(s.k, targetK, entries);
     const adherence = entries > 0 && targetK > 0 ? Math.round(s.k / targetK * 100) : 0;
-    return { date, ...s, entries, train, targetK, targetP, targetC, targetF, targetSource: keep ? "saved" : "recalculated", tdee: recalc.tdee, status, shownK: Math.round(s.k), gap: Math.round(Math.abs(targetK - s.k)), adherence };
+    return { date, ...s, entries, train, targetK, targetP, targetPMin, targetPMax, targetC, targetF, targetSource: keep ? "saved" : "recalculated", tdee: recalc.tdee, status, shownK: Math.round(s.k), gap: Math.round(Math.abs(targetK - s.k)), adherence };
   });
   const logged = days.filter((d) => d.entries > 0);
   const trainLogged = logged.filter((d) => d.train);
@@ -423,7 +457,7 @@ export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>,
     avgPAll: avgOf(days, "p"),
     avgTargetKLogged: avgOf(logged, "targetK"),
     pHitLogged: logged.filter((d) => d.p >= d.targetP * 0.95).length,
-    proteinReached: logged.filter((d) => d.p >= d.targetP).length,
+    proteinReached: logged.filter((d) => d.p >= d.targetPMin).length,
     proteinDays: logged.length,
     trainCarbReached: trainLogged.filter((d) => d.c >= d.targetC).length,
     trainLogged: trainLogged.length,
