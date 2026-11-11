@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
-import { addDays, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weeklyDeficit, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
+import { addDays, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weeklyDeficit, migrateProteinTargets, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
 
 const profile: Profile = { h: "170", w: "82", age: "34", bf: "", act: "1.6", def: "18" };
 const e = (id: number, k: number, p: number, c = 0, f = 0, grams = 100): Entry => ({ id, meal: "午餐", name: "食物", grams, k, p, c, f });
@@ -171,25 +171,31 @@ describe("carb cycle from the 2026-11-11 measurement", () => {
   it("lands near the high-carb training day and low-carb rest day", () => {
     const t = calcTargets(pr, true);
     const r = calcTargets(pr, false);
-    expect(t.p).toBe(165);
+    expect(t.lbm).toBe(65.9);
+    expect(t.pMin).toBe(160);
+    expect(t.pMax).toBe(175);
+    expect(t.pRef).toBe(174);
+    expect(t.p).toBe(160);
     expect(t.c).toBe(240);
-    expect(t.f).toBe(55);
-    expect(t.kcal).toBe(4 * 165 + 4 * 240 + 9 * 55);
-    expect(t.kcal).toBeGreaterThan(2100);
-    expect(t.kcal).toBeLessThan(2200);
-    expect(r.p).toBe(165);
+    expect(t.f).toBe(51);
+    expect(t.kcal).toBe(4 * 174 + 4 * 240 + 9 * 51);
+    expect(t.kcal).toBe(2115);
+    expect(r.pMin).toBe(160);
+    expect(r.pMax).toBe(175);
     expect(r.c).toBe(120);
-    expect(r.f).toBe(65);
-    expect(r.kcal).toBe(4 * 165 + 4 * 120 + 9 * 65);
+    expect(r.f).toBe(61);
+    expect(r.kcal).toBe(1725);
     expect(r.kcal).toBeGreaterThan(1700);
     expect(r.kcal).toBeLessThan(1800);
     expect(t.kcal).toBeGreaterThan(r.kcal);
     expect(weeklyDeficit(pr)).toBeGreaterThan(0);
   });
   it("lets a manual override replace one macro and keeps Friday on the training target", () => {
-    const t = calcTargets({ ...pr, tp: "170" }, true);
-    expect(t.p).toBe(170);
+    const t = calcTargets({ ...pr, pLo: "170", pHi: "180" }, true);
+    expect(t.pMin).toBe(170);
+    expect(t.pMax).toBe(180);
     expect(t.c).toBe(240);
+    expect(t.kcal).toBe(2115);
     expect(calcTargets({ ...pr, tk: "2200" }, true).kcal).toBe(2200);
     const w = analyzeWindow({ "2026-11-06": [{ id: 1, meal: "午餐", name: "a", grams: 100, k: 2000, p: 150, c: 200, f: 50 }] }, "2026-11-08", pr);
     const fri = w.days.find((d) => d.date === "2026-11-06")!;
@@ -201,6 +207,26 @@ describe("carb cycle from the 2026-11-11 measurement", () => {
     expect(needsTrainCarb(true, "午餐", 20)).toBe(false);
     expect(needsTrainCarb(false, "早餐", 10)).toBe(false);
     expect(needsTrainCarb(true, "早餐", 40)).toBe(false);
+  });
+});
+
+describe("v35 protein migration", () => {
+  it("drops stored auto protein 165/174 for the 160–175 range and keeps a real override", () => {
+    const next = migrateProteinTargets({ ...PROFILE_DEFAULT, tp: "165", tf: "55", rp: "174", rf: "65", tc: "200" });
+    expect(next.tp).toBe("");
+    expect(next.rp).toBe("");
+    expect(next.tf).toBe("51");
+    expect(next.rf).toBe("61");
+    expect(next.tc).toBe("200");
+    expect(next.pLo).toBeUndefined();
+    const custom = migrateProteinTargets({ ...PROFILE_DEFAULT, tp: "180", tf: "40", rp: "170", rf: "70" });
+    expect(custom.pLo).toBe("170");
+    expect(custom.pHi).toBe("180");
+    expect(custom.tf).toBe("40");
+    expect(custom.rf).toBe("70");
+    expect(migrateProteinTargets(PROFILE_DEFAULT)).toEqual(PROFILE_DEFAULT);
+    expect(calcTargets(next, true)).toMatchObject({ pMin: 160, pMax: 175, c: 200, f: 51 });
+    expect(calcTargets(custom, true)).toMatchObject({ pMin: 170, pMax: 180, f: 40 });
   });
 });
 
@@ -227,6 +253,16 @@ describe("carb-cycle analytics", () => {
     expect(by("2026-11-08").status).toBe("未记录");
     expect(w.proteinDays).toBe(3);
     expect(w.proteinReached).toBe(2);
+    expect(by("2026-11-06").targetPMin).toBe(160);
+    expect(by("2026-11-06").targetPMax).toBe(175);
+    expect(by("2026-11-07").targetPMin).toBe(160);
+    const band = analyzeWindow({
+      "2026-11-06": [food(4, 1000, 159, 100, 20)],
+      "2026-11-07": [food(5, 1000, 160, 80, 20)],
+      "2026-11-08": [food(6, 1000, 180, 80, 20)],
+    }, "2026-11-08", pr);
+    expect(band.proteinDays).toBe(3);
+    expect(band.proteinReached).toBe(2);
     expect(w.trainLogged).toBe(2);
     expect(w.trainCarbReached).toBe(1);
     expect(w.trainAvg.days).toBe(2);
@@ -241,7 +277,7 @@ describe("carb-cycle analytics", () => {
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v34", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v34"');
+  it("bumps the cache to ct-v35", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v35"');
   });
 });

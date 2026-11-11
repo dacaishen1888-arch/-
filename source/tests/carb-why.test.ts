@@ -7,24 +7,28 @@ const rest = calcTargets(PROFILE_DEFAULT, false);
 describe("carb reassurance copy", () => {
   it("fills the calorie line from the current training or rest targets", () => {
     const day = carbWhy(train, true).join("\n");
-    const sum = r0(train.p * 4 + train.c * 4 + train.f * 9);
-    expect(day).toContain(`训练日 蛋白${train.p}g×4 + 碳水${train.c}g×4 + 脂肪${train.f}g×9 = ${sum} kcal`);
+    const sum = r0(train.pRef * 4 + train.c * 4 + train.f * 9);
+    expect(day).toContain(`训练日 蛋白${train.pRef}g×4 + 碳水${train.c}g×4 + 脂肪${train.f}g×9 = ${sum} kcal`);
+    expect(day).toContain(`${train.pMin}–${train.pMax}g`);
+    expect(day).toContain(`到 ${train.pMin}g 就算吃够`);
     expect(day).toContain(`低于消耗约 ${r0(train.tdee - train.kcal)} kcal`);
     expect(day).toContain("不会变成腹部脂肪");
     const off = carbWhy(rest, false).join("\n");
-    expect(off).toContain(`休息日 蛋白${rest.p}g×4 + 碳水${rest.c}g×4 + 脂肪${rest.f}g×9`);
+    expect(off).toContain(`休息日 蛋白${rest.pRef}g×4 + 碳水${rest.c}g×4 + 脂肪${rest.f}g×9`);
     expect(off).not.toContain(`碳水${train.c}g`);
   });
 
   it("follows an overridden target instead of the default 2115 formula", () => {
-    const pr: Profile = { ...PROFILE_DEFAULT, tp: "150", tc: "180", tf: "40" };
+    const pr: Profile = { ...PROFILE_DEFAULT, pLo: "150", pHi: "170", tc: "180", tf: "40" };
     const tg = calcTargets(pr, true);
-    expect(tg.p).toBe(150);
+    expect(tg.pMin).toBe(150);
+    expect(tg.pMax).toBe(170);
+    expect(tg.pRef).toBe(174);
     expect(tg.c).toBe(180);
     expect(tg.f).toBe(40);
     const text = carbWhy(tg, true).join("\n");
-    expect(text).toContain("蛋白150g×4 + 碳水180g×4 + 脂肪40g×9");
-    expect(text).toContain(String(r0(150 * 4 + 180 * 4 + 40 * 9)));
+    expect(text).toContain("蛋白174g×4 + 碳水180g×4 + 脂肪40g×9");
+    expect(text).toContain("150–170g");
     expect(text).not.toContain("蛋白165g");
   });
 });
@@ -65,9 +69,16 @@ describe("next-meal hint when carbs and fat compete", () => {
 describe("compact today chips and the hold-to-read tip", () => {
   const idle: HoldState = { phase: "idle", open: false };
   it("shortens each macro to a chip such as 还差75g and 还可吃715", () => {
-    const a = todayAnalysis({ k: 1400, p: 90, c: train.c - 75, f: 46 }, train, true, 12);
-    expect(a.lines.map((l) => l.chip)).toEqual(["还可吃715", "还差75g", `还差${train.c - (train.c - 75)}g`, "还可吃9g"]);
-    expect(a.lines.find((l) => l.name === "蛋白")?.text).toContain("还差 75g");
+    const a = todayAnalysis({ k: 1400, p: 90, c: train.c - 75, f: 20 }, train, true, 12);
+    expect(train.pMin).toBe(160);
+    expect(train.pMax).toBe(175);
+    expect(train.f).toBe(51);
+    expect(a.lines.map((l) => l.chip)).toEqual(["还可吃715", `还差${train.pMin - 90}g`, "还差75g", `还可吃${train.f - 20}g`]);
+    expect(a.lines.find((l) => l.name === "蛋白")).toMatchObject({ tone: "must", text: `蛋白还差 ${train.pMin - 90}g 到下限` });
+    const inside = todayAnalysis({ k: 1400, p: 168, c: train.c, f: 20 }, train, true, 12).lines.find((l) => l.name === "蛋白");
+    expect(inside).toMatchObject({ tone: "done", chip: "已吃够" });
+    const high = todayAnalysis({ k: 1400, p: 180, c: train.c, f: 20 }, train, true, 12).lines.find((l) => l.name === "蛋白");
+    expect(high).toMatchObject({ tone: "near", chip: "略超5g" });
   });
   it("opens on a 400ms hold and closes when the finger lifts", () => {
     const held = holdPress(holdPress(idle, "down"), "hold");
