@@ -1,6 +1,12 @@
 export type Food = { n: string; k: number; p: number; c: number; f: number; g: number; u: string; t?: string; su?: string; mine?: boolean };
 export type Entry = { id: number; meal: string; name: string; grams: number; k: number; p: number; c: number; f: number };
-export type Profile = { h: string; w: string; age: string; bf: string; act: string; def: string; wt?: string };
+export type Profile = {
+  h: string; w: string; age: string; bf: string; act: string; def: string; wt?: string;
+  bmr?: string;
+  tk?: string; tp?: string; tc?: string; tf?: string;
+  rk?: string; rp?: string; rc?: string; rf?: string;
+};
+export const PROFILE_DEFAULT: Profile = { h: "170", w: "80.1", age: "34", bf: "17.7", bmr: "1795", act: "1.6", def: "18" };
 export type Body = { date: string; w: number; waist: number };
 export type Macros = { k: number; p: number; c: number; f: number };
 
@@ -46,17 +52,48 @@ export function lastNDays(end: string, n = 7): string[] {
   return Array.from({ length: n }, (_, i) => addDays(end, i - (n - 1)));
 }
 
+function opt(v: string | undefined, fallback: number): number {
+  if (v == null || String(v).trim() === "") return fallback;
+  const n = parseFloat(v);
+  return isFinite(n) && n >= 0 ? r0(n) : fallback;
+}
+
+export function bmrOf(pr: Profile): { bmr: number; source: "measured" | "katch" | "mifflin"; lbm: number } {
+  const h = parseFloat(pr.h) || 170, w = parseFloat(pr.w) || 80.1, a = parseFloat(pr.age) || 34, bf = parseFloat(pr.bf);
+  const lbm = bf > 3 && bf < 60 ? w * (1 - bf / 100) : w;
+  const measured = parseFloat(pr.bmr || "");
+  if (measured > 500 && measured < 5000) return { bmr: measured, source: "measured", lbm };
+  if (bf > 3 && bf < 60) return { bmr: 370 + 21.6 * lbm, source: "katch", lbm };
+  return { bmr: 10 * w + 6.25 * h - 5 * a + 5, source: "mifflin", lbm };
+}
+
 export function calcTargets(pr: Profile, train: boolean) {
-  const h = parseFloat(pr.h) || 170, w = parseFloat(pr.w) || 82, a = parseFloat(pr.age) || 34, bf = parseFloat(pr.bf);
-  const bmr = bf > 3 && bf < 60 ? 370 + 21.6 * w * (1 - bf / 100) : 10 * w + 6.25 * h - 5 * a + 5;
+  const w = parseFloat(pr.w) || 80.1;
+  const { bmr, source, lbm } = bmrOf(pr);
   const base = parseFloat(pr.act) || 1.55;
   const mult = train ? base : Math.max(1.2, base - 0.3);
-  const tdee = bmr * mult;
-  const def = (parseFloat(pr.def) || 18) / 100;
-  const kcal = tdee * (1 - def);
-  const p = w * 2.1, f = w * 0.8;
-  const c = Math.max(80, (kcal - p * 4 - f * 9) / 4);
-  return { bmr: r0(bmr), tdee: r0(tdee), kcal: r0(kcal), p: r0(p), c: r0(c), f: r0(f) };
+  const hasBf = lbm < w - 0.05;
+  const p0 = r0(hasBf ? lbm * 2.5 : w * 2.06);
+  const c0 = r0(w * (train ? 3 : 1.5));
+  const f0 = r0(w * (train ? 0.687 : 0.812));
+  const p = opt(train ? pr.tp : pr.rp, p0);
+  const c = opt(train ? pr.tc : pr.rc, c0);
+  const f = opt(train ? pr.tf : pr.rf, f0);
+  const kcal = opt(train ? pr.tk : pr.rk, r0(p * 4 + c * 4 + f * 9));
+  return { bmr: r0(bmr), bmrSource: source, lbm: Math.round(lbm * 10) / 10, tdee: r0(bmr * mult), kcal, p, c, f };
+}
+
+export function weeklyDeficit(pr: Profile): number {
+  const b = bmrOf(pr).bmr;
+  const act = parseFloat(pr.act) || 1.55;
+  const tdeeT = b * act, tdeeR = b * Math.max(1.2, act - 0.3);
+  const inn = calcTargets(pr, true).kcal * 5 + calcTargets(pr, false).kcal * 2;
+  const out = tdeeT * 5 + tdeeR * 2;
+  return r0((out - inn) / 7);
+}
+
+export function needsTrainCarb(train: boolean, meal: string, carbs: number): boolean {
+  return train && (meal === "早餐" || meal === "训练后") && carbs < 40;
 }
 
 export function sumEntries(es: readonly { k: number; p: number; c: number; f: number }[]): Macros {
