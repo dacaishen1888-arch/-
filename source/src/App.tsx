@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, proteinBand, r0, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, proteinBand, r0, scaleEntryGrams, scaleEntryKcal, seenReminders, shanghaiClock, shanghaiToday, streakCount, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1119,6 +1119,8 @@ export default function App() {
     } catch (e) { /* ignore */ }
   }, []);
   const [date, setDate] = useState<string>(today);
+  const [mealEdit, setMealEdit] = useState<string>("");
+  useEffect(() => { setMealEdit(""); }, [date]);
   const [log, setLog] = useState<Record<string, Entry[]>>(() => load<Record<string, Entry[]>>("fl_log", {}));
   const [body, setBody] = useState<Body[]>(() => load<Body[]>("fl_body", []));
   const [meal, setMeal] = useState<string>("早餐");
@@ -1250,6 +1252,7 @@ export default function App() {
   const addFood = () => { if (!sel || !g) return; clearQ(); addEntry({ meal, name: sel.su ? `${sel.n} ${g}${sel.su}` : sel.n, grams: sel.su ? 0 : g, k: sel.k * mult, p: sel.p * mult, c: sel.c * mult, f: sel.f * mult }); setGrams(""); };
   const addCustom = () => { if (!cu.n) return; const cg = parseFloat(cu.g) || 100; const m = 100 / cg; const nf: Food = { n: cu.n, k: r0((parseFloat(cu.k) || 0) * m), p: +((parseFloat(cu.p) || 0) * m).toFixed(1), c: +((parseFloat(cu.c) || 0) * m).toFixed(1), f: +((parseFloat(cu.f) || 0) * m).toFixed(1), g: cg, u: `我的食物 ${cg}g`, t: "我的食物 自定义", mine: true }; if (saveMine) rememberFoods([nf]); addEntry({ meal, name: cu.n + "(自定义)", grams: parseFloat(cu.g) || 0, k: parseFloat(cu.k) || 0, p: parseFloat(cu.p) || 0, c: parseFloat(cu.c) || 0, f: parseFloat(cu.f) || 0 }, saveMine); setCu({ n: "", g: "100", k: "", p: "", c: "", f: "" }); };
   const del = (id: number) => setLog((L: Record<string, Entry[]>) => ({ ...L, [date]: (L[date] || []).filter((e: Entry) => e.id !== id) }));
+  const patchLog = (id: number, fn: (e: Entry) => Entry) => setLog((L: Record<string, Entry[]>) => ({ ...L, [date]: (L[date] || []).map((e: Entry) => e.id === id ? fn(e) : e) }));
   const shift = (n: number) => setDate(addDays(date, n));
   const addBody = () => { const w = parseFloat(bw), wa = parseFloat(waist); if (!w && !wa) return; setBody((B: Body[]) => [...B.filter((b: Body) => b.date !== date), { date, w: w || 0, waist: wa || 0 }].sort((a: Body, b: Body) => a.date.localeCompare(b.date))); if (w) setProfile({ ...profile, w: String(w) }); setBw(""); setWaist(""); };
 
@@ -1348,8 +1351,8 @@ export default function App() {
   const setEd = (f: (es: Entry[]) => Entry[]) => setTpls((T: Record<string, Entry[]>) => ({ ...T, [edName]: f(T[edName] || []) }));
   const renameTpl = () => { const n = edNew.trim(); if (!n || n === edName) return; if (tpls[n]) { flash("已有同名常规"); return; } setTpls((T: Record<string, Entry[]>) => { const c: Record<string, Entry[]> = {}; Object.keys(T).forEach((k: string) => { c[k === edName ? n : k] = T[k]; }); return c; }); setTplDef((D: { train: string; rest: string }) => ({ train: D.train === edName ? n : D.train, rest: D.rest === edName ? n : D.rest })); setEdName(n); flash("已重命名"); };
   const delTpl = (n: string) => { if (!window.confirm(`删除常规“${n}”？`)) return; setTpls((T: Record<string, Entry[]>) => { const c = { ...T }; delete c[n]; return c; }); setTplDef((D: { train: string; rest: string }) => ({ train: D.train === n ? "" : D.train, rest: D.rest === n ? "" : D.rest })); if (edName === n) setEdName(""); };
-  const setG = (id: number, v: string) => { const ng = parseFloat(v); if (!(ng > 0)) return; setEd((es: Entry[]) => es.map((e: Entry) => { if (e.id !== id || !e.grams) return e; const m = ng / e.grams; return { ...e, grams: ng, k: e.k * m, p: e.p * m, c: e.c * m, f: e.f * m }; })); };
-  const setK = (id: number, v: string) => { const nk = parseFloat(v); if (!(nk > 0)) return; setEd((es: Entry[]) => es.map((e: Entry) => { if (e.id !== id || !(e.k > 0)) return e; const m = nk / e.k; return { ...e, k: nk, p: e.p * m, c: e.c * m, f: e.f * m }; })); };
+  const setG = (id: number, v: string) => { const ng = parseFloat(v); if (!(ng > 0)) return; setEd((es: Entry[]) => es.map((e: Entry) => e.id === id ? scaleEntryGrams(e, ng) : e)); };
+  const setK = (id: number, v: string) => { const nk = parseFloat(v); if (!(nk > 0)) return; setEd((es: Entry[]) => es.map((e: Entry) => e.id === id ? scaleEntryKcal(e, nk) : e)); };
   const rMatches = rq.trim() ? FOODS.map((f: Food) => ({ f, s: score(f, rq) })).filter((x: { f: Food; s: number }) => x.s > 0).sort((a: { f: Food; s: number }, b: { f: Food; s: number }) => b.s - a.s).slice(0, 8).map((x: { f: Food; s: number }) => x.f) : [];
   const rMeals = MEALS.filter((m: string) => routine.some((e: Entry) => e.meal === m));
   const spTot = sp.reduce((a: number[], r: [string, string, string, number, number, number, number]) => [a[0] + r[3], a[1] + r[4], a[2] + r[5], a[3] + r[6]], [0, 0, 0, 0]);
@@ -1590,19 +1593,23 @@ export default function App() {
               const es = entries.filter((e: Entry) => e.meal === m);
               const mk = es.reduce((a: number, e: Entry) => a + e.k, 0), mp = es.reduce((a: number, e: Entry) => a + e.p, 0), mc = es.reduce((a: number, e: Entry) => a + e.c, 0);
               return (
-                <div key={m} className="ct-meal" data-meal={m} style={{ background: `${MEAL_C[m]}14`, border: `1px solid ${MEAL_C[m]}33`, borderLeft: `4px solid ${MEAL_C[m]}`, borderRadius: 16, padding: "10px 12px 4px" }}>
+                <div key={m} className="ct-meal" data-meal={m} data-editing={mealEdit === m ? "1" : "0"} style={{ background: `${MEAL_C[m]}14`, border: `1px solid ${MEAL_C[m]}33`, borderLeft: `4px solid ${MEAL_C[m]}`, borderRadius: 16, padding: "10px 12px 4px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: `1px solid ${MEAL_C[m]}33`, paddingBottom: 8 }}>
                     <span style={{ width: 26, height: 26, borderRadius: 13, background: `${MEAL_C[m]}2e`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>{MEAL_I[m]}</span>
                     <span style={{ color: MEAL_C[m], fontWeight: 700, fontSize: 16 }}>{m}</span>
                     <span style={{ marginLeft: "auto", color: th.text.secondary, fontSize: 13 }}><b style={{ color: MEAL_C[m] }}>{r0(mk)}</b> kcal · 蛋白 {r0(mp)}g</span>
+                    <button type="button" className={`ct-ib${mealEdit === m ? " on" : ""}`} aria-pressed={mealEdit === m} aria-label={mealEdit === m ? `完成编辑${m}` : `编辑${m}`} onClick={() => setMealEdit(mealEdit === m ? "" : m)}>{mealEdit === m ? chk : pen}</button>
                   </div>
                   {needsTrainCarb(train, m, mc) && <p className="ct-carb" data-testid={`carb-${m}`}>训练前后补碳：建议各 40–60g</p>}
                   {es.map((e: Entry) => (
                     <div key={e.id} className={hl.includes(e.id) ? "ct-hl" : ""} style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${th.border.subtle}`, color: th.text.secondary, fontSize: th.font.body2.fontSize }}>
-                      <span style={{ color: th.text.primary }}>{e.name} {e.grams ? `${e.grams}g` : ""}</span>
-                      {e.qty ? <QtyPicker label={`记录${e.id}`} value={e.qty} onChange={(q: number) => setEntryQty(e.id, q)} /> : null}
-                      <span className="ct-sub" style={{ marginLeft: "auto" }}>{r0(e.k)} kcal · P{e.p.toFixed(0)}</span>
-                      <button className="ct-ic" aria-label="删除" onClick={() => del(e.id)}>✕</button>
+                      <span style={{ color: th.text.primary, flex: "1 1 120px" }}>{e.name}{mealEdit === m ? "" : e.grams ? ` ${e.grams}g` : ""}</span>
+                      {mealEdit === m ? <Fragment>
+                        <select aria-label={`餐次 ${e.name}`} value={e.meal} onChange={(ev: ChangeEvent<HTMLSelectElement>) => patchLog(e.id, (x: Entry) => ({ ...x, meal: ev.target.value }))} className="ct-mini">{MEALS.map((mm: string) => <option key={mm} value={mm}>{mm}</option>)}</select>
+                        {e.grams > 0 ? <input className="ct-mini" type="number" inputMode="decimal" aria-label={`克数 ${e.name}`} defaultValue={String(r0(e.grams))} key={`${e.id}-g-${r0(e.grams)}`} onBlur={(ev: { target: { value: string } }) => patchLog(e.id, (x: Entry) => scaleEntryGrams(x, parseFloat(ev.target.value)))} /> : <input className="ct-mini" type="number" inputMode="decimal" aria-label={`热量 ${e.name}`} defaultValue={String(r0(e.k))} key={`${e.id}-k-${r0(e.k)}`} onBlur={(ev: { target: { value: string } }) => patchLog(e.id, (x: Entry) => scaleEntryKcal(x, parseFloat(ev.target.value)))} />}
+                        {e.qty ? <QtyPicker label={`记录${e.id}`} value={e.qty} onChange={(q: number) => setEntryQty(e.id, q)} /> : null}
+                        <button className="ct-ic" aria-label={`删除 ${e.name}`} onClick={() => del(e.id)}>✕</button>
+                      </Fragment> : <span className="ct-sub">{r0(e.k)} kcal · P{e.p.toFixed(0)}</span>}
                     </div>
                   ))}
                 </div>
@@ -1850,6 +1857,8 @@ button:active,.ct-row:active{transform:scale(.97);opacity:.85}
 .ct-sess{display:flex;flex-direction:column;max-height:30vh;overflow-y:auto}.ct-sess>div{display:flex;justify-content:space-between;align-items:center;padding:4px 2px;border-top:1px solid #222}.ct-sess button{width:32px;height:32px;border:none;background:none;color:#8e8e93;font-size:15px;cursor:pointer}
 .ct-hl{animation:ctH 1.4s ease-out}@keyframes ctH{0%,30%{background:rgba(255,176,32,.25)}100%{background:transparent}}
 .ct-ib{flex:none;display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border-radius:16px;border:.5px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:rgba(235,235,245,.6);cursor:pointer;-webkit-tap-highlight-color:transparent}.ct-ib:active{background:rgba(255,255,255,.16)}.ct-ib.on{background:rgba(146,232,42,.18);border-color:rgba(146,232,42,.4);color:#92e82a}
+.ct-mini{height:36px;min-height:36px;width:76px;box-sizing:border-box;padding:4px 8px;border-radius:10px;border:1px solid #3a3a3c;background:#0b0b0b;color:#fff;font-size:15px}
+select.ct-mini{width:88px}
 .ct-ws{display:flex;flex-direction:column;gap:12px}.ct-sub{font-size:13px;color:#8e8e93;font-weight:600;letter-spacing:.5px}
 .ct-wbar{height:8px;border-radius:4px;background:rgba(30,234,239,.14);overflow:hidden}.ct-wbar>div{height:100%;border-radius:4px;background:linear-gradient(90deg,#0a84ff,#1eeaef);transition:width .4s}
 .ct-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}

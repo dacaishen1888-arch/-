@@ -313,6 +313,18 @@ export function clampQty(q: number): number {
   return Math.min(10, Math.max(0.5, stepped));
 }
 
+export function scaleEntryGrams<T extends { grams: number; k: number; p: number; c: number; f: number }>(e: T, grams: number): T {
+  if (!(grams > 0) || !(e.grams > 0)) return e;
+  const m = grams / e.grams;
+  return { ...e, grams, k: e.k * m, p: e.p * m, c: e.c * m, f: e.f * m };
+}
+
+export function scaleEntryKcal<T extends { k: number; p: number; c: number; f: number }>(e: T, kcal: number): T {
+  if (!(kcal > 0) || !(e.k > 0)) return e;
+  const m = kcal / e.k;
+  return { ...e, k: kcal, p: e.p * m, c: e.c * m, f: e.f * m };
+}
+
 export function applyQty<T extends { name: string; grams: number; k: number; p: number; c: number; f: number; qty?: number }>(e: T, qty: number): T {
   const q = clampQty(qty);
   const prev = e.qty && e.qty > 0 ? e.qty : 1;
