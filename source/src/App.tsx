@@ -1360,7 +1360,6 @@ export default function App() {
   const setG = (id: number, v: string) => { const ng = parseFloat(v); if (!(ng > 0)) return; setEd((es: Entry[]) => es.map((e: Entry) => e.id === id ? scaleEntryGrams(e, ng) : e)); };
   const setK = (id: number, v: string) => { const nk = parseFloat(v); if (!(nk > 0)) return; setEd((es: Entry[]) => es.map((e: Entry) => e.id === id ? scaleEntryKcal(e, nk) : e)); };
   const rMatches = rq.trim() ? FOODS.map((f: Food) => ({ f, s: score(f, rq) })).filter((x: { f: Food; s: number }) => x.s > 0).sort((a: { f: Food; s: number }, b: { f: Food; s: number }) => b.s - a.s).slice(0, 8).map((x: { f: Food; s: number }) => x.f) : [];
-  const rMeals = MEALS.filter((m: string) => routine.some((e: Entry) => e.meal === m));
   const spTot = sp.reduce((a: number[], r: [string, string, string, number, number, number, number]) => [a[0] + r[3], a[1] + r[4], a[2] + r[5], a[3] + r[6]], [0, 0, 0, 0]);
 
   const tplEditor = (
@@ -1554,11 +1553,8 @@ export default function App() {
           {suppCard}
         <button type="button" className="ct-rthd" aria-expanded={rtOpen} onClick={() => setRtOpen(!rtOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", minHeight: 44, marginTop: 12, padding: "10px 0 0", background: "none", border: "none", borderTop: "1px solid rgba(255,255,255,.08)", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left" }}><span>{`我的常规 (${Object.keys(tpls).length})`}</span><span className="ct-chev" style={{ transform: rtOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }}>›</span></button>
         {rtOpen && <div className="ct-rtbody" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-          {(routine.length > 0 || rMeals.length > 0) && <div className="ct-quick" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {routine.length > 0 ? <Fragment><QtyPicker label={rkey || "常规"} value={pickQty["t:" + rkey] ?? 1} onChange={(n: number) => setPickQty((M) => ({ ...M, ["t:" + rkey]: n }))} /><MealCapsules label="一键添加时改放到" value={addMeal} onChange={(m: string) => chooseMeal(m, "add")} /><Btn label={`⚡ 添加到${addMeal}「${rkey}」×${formatQty(pickQty["t:" + rkey] ?? 1)}`} variant="primary" full onClick={() => { const q = pickQty["t:" + rkey] ?? 1; cloneTo(routine.map((e: Entry) => ({ ...applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, q), meal: addMeal }))); flash(`已添加到${addMeal} ×${formatQty(q)}，可撤销`); }} /></Fragment> : null}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {rMeals.map((m: string) => <Btn key={m} label={`+${m}`} onClick={() => { const q = pickQty["t:" + rkey] ?? 1; cloneTo(routine.filter((e: Entry) => e.meal === m).map((e: Entry) => applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, q))); flash(`已添加${m} ×${formatQty(q)}，可撤销`); }} />)}
-          </div>
+          {routine.length > 0 && <div className="ct-quick" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <QtyPicker label={rkey || "常规"} value={pickQty["t:" + rkey] ?? 1} onChange={(n: number) => setPickQty((M) => ({ ...M, ["t:" + rkey]: n }))} /><MealCapsules label="一键添加时改放到" value={addMeal} onChange={(m: string) => chooseMeal(m, "add")} /><Btn label={`⚡ 添加到${addMeal}「${rkey}」×${formatQty(pickQty["t:" + rkey] ?? 1)}`} variant="primary" full onClick={() => { const q = pickQty["t:" + rkey] ?? 1; cloneTo(routine.map((e: Entry) => ({ ...applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, q), meal: addMeal }))); flash(`已添加到${addMeal} ×${formatQty(q)}，可撤销`); }} />
           </div>}
           <div id="rt-sec" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {Object.keys(tpls).length > 0 && <Btn label={rtEdit ? "✓ 完成" : "✎ 编辑"} variant={rtEdit ? "primary" : "quiet"} onClick={() => { setRtEdit(!rtEdit); setEdName(""); }} />}
@@ -1566,7 +1562,7 @@ export default function App() {
             <Btn label="把今天存为常规" onClick={() => { if (!entries.length) { flash("今天还没有记录"); return; } askNew(entries); }} />
           </div>
           {Object.keys(tpls).length === 0 && <Text>还没有常规。点“+ 新建常规”起个名字，再搜索食物加入；之后一键添加到今天。</Text>}
-          {Object.keys(tpls).map((n: string) => { const es = Array.isArray(tpls[n]) ? tpls[n] : []; const ms = MEALS.filter((m: string) => es.some((e: Entry) => e.meal === m)); const qn = pickQty["t:" + n] ?? 1; const addAll = () => { if (!es.length) { flash("这个常规还是空的"); return; } cloneTo(es.map((e: Entry) => ({ ...applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, qn), meal: addMeal }))); flash(`已添加到${addMeal} ×${formatQty(qn)}，可撤销`); };
+          {Object.keys(tpls).map((n: string) => { const es = Array.isArray(tpls[n]) ? tpls[n] : []; const qn = pickQty["t:" + n] ?? 1; const addAll = () => { if (!es.length) { flash("这个常规还是空的"); return; } cloneTo(es.map((e: Entry) => ({ ...applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, qn), meal: addMeal }))); flash(`已添加到${addMeal} ×${formatQty(qn)}，可撤销`); };
             return <div key={n} data-tpl={n} style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, border: `1px solid ${n === edName ? th.text.primary : th.border.default}`, borderRadius: 12 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <div role={rtEdit ? undefined : "button"} onClick={rtEdit ? undefined : addAll} style={{ flex: "1 1 auto", minWidth: 0, minHeight: 44, display: "flex", flexDirection: "column", justifyContent: "center", cursor: rtEdit ? "default" : "pointer" }}>
@@ -1578,7 +1574,6 @@ export default function App() {
             </div>
             {!rtEdit && <QtyPicker label={n} value={qn} onChange={(v: number) => setPickQty((M) => ({ ...M, ["t:" + n]: v }))} />}
             {!rtEdit && <MealCapsules label={`${n} 添加到`} value={addMeal} onChange={(m: string) => chooseMeal(m, "add")} />}
-            {!rtEdit && ms.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{ms.map((m: string) => <Btn key={m} label={`+${m}`} onClick={() => { cloneTo(es.filter((e: Entry) => e.meal === m).map((e: Entry) => applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, qn))); flash(`已添加${m} ×${formatQty(qn)}，可撤销`); }} />)}</div>}
             {rtEdit && n === edName && tplEditor}
           </div>; })}
         </div>}
