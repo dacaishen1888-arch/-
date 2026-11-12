@@ -1225,7 +1225,7 @@ export default function App() {
   const [sess, setSess] = useState<Entry[]>([]);
   const [sessOpen, setSessOpen] = useState(false);
   const [hl, setHl] = useState<number[]>([]);
-  const notify = (es: Entry[]) => { if (!es.length) return; const k = es.reduce((a: number, e: Entry) => a + e.k, 0); const t = es.length === 1 ? `✓ 已添加 ${es[0].name}${es[0].grams ? ` ${r0(es[0].grams)}g` : ""} · ${r0(k)}kcal` : `✓ 已添加 ${es.length} 样 · ${r0(k)}kcal`; setAT((o: { n: number } | null) => ({ t, ids: es.map((e: Entry) => e.id), n: (o ? o.n : 0) + 1 })); window.clearTimeout(aTim.current); aTim.current = window.setTimeout(() => setAT(null), 2500); try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) { } setSess((S: Entry[]) => [...es, ...S]); setHl(es.map((e: Entry) => e.id)); window.setTimeout(() => setHl([]), 1400); };
+  const notify = (es: Entry[], text?: string) => { if (!es.length) return; const k = es.reduce((a: number, e: Entry) => a + e.k, 0); const t = text || (es.length === 1 ? `✓ 已添加 ${es[0].name}${es[0].grams ? ` ${r0(es[0].grams)}g` : ""} · ${r0(k)}kcal` : `✓ 已添加 ${es.length} 样 · ${r0(k)}kcal`); setAT((o: { n: number } | null) => ({ t, ids: es.map((e: Entry) => e.id), n: (o ? o.n : 0) + 1 })); window.clearTimeout(aTim.current); aTim.current = window.setTimeout(() => setAT(null), 2500); try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) { } setSess((S: Entry[]) => [...es, ...S]); setHl(es.map((e: Entry) => e.id)); window.setTimeout(() => setHl([]), 1400); };
   const rmIds = (ids: number[]) => { const st = new Set(ids); const gone = Object.values(log).flat().filter((e: Entry) => st.has(e.id)).map((e: Entry) => e.name); setLog((L: Record<string, Entry[]>) => { const n: Record<string, Entry[]> = {}; Object.keys(L).forEach((d: string) => { n[d] = (L[d] || []).filter((e: Entry) => !st.has(e.id)); }); return n; }); setSess((S: Entry[]) => S.filter((e: Entry) => !st.has(e.id))); const sn = suppList.filter((it: SuppItem) => gone.some((name: string) => name === it.n || name.startsWith(it.n + " ×") || name.startsWith(suppEntryName(it)))).map((it: SuppItem) => it.n); if (sn.length) setSupp((S: Record<string, string[]>) => ({ ...S, [date]: (S[date] || []).filter((x: string) => !sn.includes(x)) })); };
   const undoAT = () => { if (!aT) return; rmIds(aT.ids); setAT(null); window.clearTimeout(aTim.current); flash("已撤销"); };
   const foodFromEntry = (e: Entry): Food | null => foodFromEntryEx(e, (n: string) => isBaseFoodName(n, BASE_NAMES));
@@ -1281,7 +1281,8 @@ export default function App() {
   useEffect(() => { if (!undoIds.length) return; const t = window.setTimeout(() => setUndoIds([]), 5000); return () => window.clearTimeout(t); }, [undoIds]);
   useEffect(() => { setUndoIds([]); }, [tab]);
   const undo = () => { const ids = new Set(undoIds); setLog((L: Record<string, Entry[]>) => ({ ...L, [date]: (L[date] || []).filter((e: Entry) => !ids.has(e.id)) })); setUndoIds([]); flash("已撤销"); };
-  const cloneTo = (es: Entry[], when = date, remember = true) => { const t = Date.now(); setUndoIds(es.map((_: Entry, i: number) => t + i)); const ne = es.map((e: Entry, i: number) => ({ ...e, id: t + i })); setLog((L: Record<string, Entry[]>) => ({ ...L, [when]: [...(L[when] || []), ...ne] })); notify(ne); if (remember) rememberFoods(ne.map(foodFromEntry).filter((f: Food | null): f is Food => !!f)); };
+  const cloneTo = (es: Entry[], when = date, remember = true, text?: string) => { const t = Date.now(); setUndoIds(es.map((_: Entry, i: number) => t + i)); const ne = es.map((e: Entry, i: number) => ({ ...e, id: t + i })); setLog((L: Record<string, Entry[]>) => ({ ...L, [when]: [...(L[when] || []), ...ne] })); notify(ne, text); if (remember) rememberFoods(ne.map(foodFromEntry).filter((f: Food | null): f is Food => !!f)); };
+  const placeRoutine = (name: string, es: Entry[], q: number, meal: string) => { if (!es.length) { flash("这个常规还是空的"); return; } chooseMeal(meal, "add"); const items = es.map((e: Entry) => ({ ...applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, q), meal })); cloneTo(items, date, true, `✓ 已添加 ${name}${q === 1 ? "" : ` ×${formatQty(q)}`} 到 ${meal}`); };
   const bfDone = useRef(false);
   useEffect(() => {
     if (bfDone.current) return;
@@ -1360,7 +1361,6 @@ export default function App() {
   const setG = (id: number, v: string) => { const ng = parseFloat(v); if (!(ng > 0)) return; setEd((es: Entry[]) => es.map((e: Entry) => e.id === id ? scaleEntryGrams(e, ng) : e)); };
   const setK = (id: number, v: string) => { const nk = parseFloat(v); if (!(nk > 0)) return; setEd((es: Entry[]) => es.map((e: Entry) => e.id === id ? scaleEntryKcal(e, nk) : e)); };
   const rMatches = rq.trim() ? FOODS.map((f: Food) => ({ f, s: score(f, rq) })).filter((x: { f: Food; s: number }) => x.s > 0).sort((a: { f: Food; s: number }, b: { f: Food; s: number }) => b.s - a.s).slice(0, 8).map((x: { f: Food; s: number }) => x.f) : [];
-  const rMeals = MEALS.filter((m: string) => routine.some((e: Entry) => e.meal === m));
   const spTot = sp.reduce((a: number[], r: [string, string, string, number, number, number, number]) => [a[0] + r[3], a[1] + r[4], a[2] + r[5], a[3] + r[6]], [0, 0, 0, 0]);
 
   const tplEditor = (
@@ -1554,11 +1554,8 @@ export default function App() {
           {suppCard}
         <button type="button" className="ct-rthd" aria-expanded={rtOpen} onClick={() => setRtOpen(!rtOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", minHeight: 44, marginTop: 12, padding: "10px 0 0", background: "none", border: "none", borderTop: "1px solid rgba(255,255,255,.08)", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left" }}><span>{`我的常规 (${Object.keys(tpls).length})`}</span><span className="ct-chev" style={{ transform: rtOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }}>›</span></button>
         {rtOpen && <div className="ct-rtbody" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-          {(routine.length > 0 || rMeals.length > 0) && <div className="ct-quick" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {routine.length > 0 ? <Fragment><QtyPicker label={rkey || "常规"} value={pickQty["t:" + rkey] ?? 1} onChange={(n: number) => setPickQty((M) => ({ ...M, ["t:" + rkey]: n }))} /><MealCapsules label="一键添加时改放到" value={addMeal} onChange={(m: string) => chooseMeal(m, "add")} /><Btn label={`⚡ 添加到${addMeal}「${rkey}」×${formatQty(pickQty["t:" + rkey] ?? 1)}`} variant="primary" full onClick={() => { const q = pickQty["t:" + rkey] ?? 1; cloneTo(routine.map((e: Entry) => ({ ...applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, q), meal: addMeal }))); flash(`已添加到${addMeal} ×${formatQty(q)}，可撤销`); }} /></Fragment> : null}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {rMeals.map((m: string) => <Btn key={m} label={`+${m}`} onClick={() => { const q = pickQty["t:" + rkey] ?? 1; cloneTo(routine.filter((e: Entry) => e.meal === m).map((e: Entry) => applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, q))); flash(`已添加${m} ×${formatQty(q)}，可撤销`); }} />)}
-          </div>
+          {routine.length > 0 && <div className="ct-quick" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <QtyPicker label={rkey || "常规"} value={pickQty["t:" + rkey] ?? 1} onChange={(n: number) => setPickQty((M) => ({ ...M, ["t:" + rkey]: n }))} /><MealCapsules label={`${rkey} 添加到`} value={addMeal} onChange={(m: string) => placeRoutine(rkey, routine, pickQty["t:" + rkey] ?? 1, m)} /><Btn label={`⚡ 添加到${addMeal}「${rkey}」×${formatQty(pickQty["t:" + rkey] ?? 1)}`} variant="primary" full onClick={() => placeRoutine(rkey, routine, pickQty["t:" + rkey] ?? 1, addMeal)} />
           </div>}
           <div id="rt-sec" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {Object.keys(tpls).length > 0 && <Btn label={rtEdit ? "✓ 完成" : "✎ 编辑"} variant={rtEdit ? "primary" : "quiet"} onClick={() => { setRtEdit(!rtEdit); setEdName(""); }} />}
@@ -1566,19 +1563,18 @@ export default function App() {
             <Btn label="把今天存为常规" onClick={() => { if (!entries.length) { flash("今天还没有记录"); return; } askNew(entries); }} />
           </div>
           {Object.keys(tpls).length === 0 && <Text>还没有常规。点“+ 新建常规”起个名字，再搜索食物加入；之后一键添加到今天。</Text>}
-          {Object.keys(tpls).map((n: string) => { const es = Array.isArray(tpls[n]) ? tpls[n] : []; const ms = MEALS.filter((m: string) => es.some((e: Entry) => e.meal === m)); const qn = pickQty["t:" + n] ?? 1; const addAll = () => { if (!es.length) { flash("这个常规还是空的"); return; } cloneTo(es.map((e: Entry) => ({ ...applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, qn), meal: addMeal }))); flash(`已添加到${addMeal} ×${formatQty(qn)}，可撤销`); };
+          {Object.keys(tpls).map((n: string) => { const es = Array.isArray(tpls[n]) ? tpls[n] : []; const qn = pickQty["t:" + n] ?? 1; const addAll = () => placeRoutine(n, es, qn, addMeal);
             return <div key={n} data-tpl={n} style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, border: `1px solid ${n === edName ? th.text.primary : th.border.default}`, borderRadius: 12 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <div role={rtEdit ? undefined : "button"} onClick={rtEdit ? undefined : addAll} style={{ flex: "1 1 auto", minWidth: 0, minHeight: 44, display: "flex", flexDirection: "column", justifyContent: "center", cursor: rtEdit ? "default" : "pointer" }}>
                 <span style={{ color: th.text.primary, fontWeight: 600 }}>{`${n}${n === tplDef.train ? " 🏋" : ""}${n === tplDef.rest ? " 🛋" : ""}`}</span>
-                <span style={{ color: th.text.secondary, fontSize: 13 }}>{`${es.length}项 · ${r0(tk(es) * qn)}kcal · 蛋白${r0(tp(es) * qn)}g · ×${formatQty(qn)}${rtEdit ? "" : ` · 点按添加到${addMeal}`}`}</span>
+                <span style={{ color: th.text.secondary, fontSize: 13 }}>{`${es.length}项 · ${r0(tk(es) * qn)}kcal · 蛋白${r0(tp(es) * qn)}g · ×${formatQty(qn)}${rtEdit ? "" : " · 点餐次即添加"}`}</span>
               </div>
               {rtEdit && <button type="button" className="ct-tb" aria-label={`编辑 ${n}`} onClick={(ev: { stopPropagation: () => void }) => { ev.stopPropagation(); if (n === edName) setEdName(""); else { setEdName(n); setEdNew(n); } }}>✎</button>}
               {rtEdit && <button type="button" className="ct-tb ct-tb-del" aria-label={`删除 ${n}`} onClick={(ev: { stopPropagation: () => void }) => { ev.stopPropagation(); delTpl(n); }}>🗑</button>}
             </div>
             {!rtEdit && <QtyPicker label={n} value={qn} onChange={(v: number) => setPickQty((M) => ({ ...M, ["t:" + n]: v }))} />}
-            {!rtEdit && <MealCapsules label={`${n} 添加到`} value={addMeal} onChange={(m: string) => chooseMeal(m, "add")} />}
-            {!rtEdit && ms.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{ms.map((m: string) => <Btn key={m} label={`+${m}`} onClick={() => { cloneTo(es.filter((e: Entry) => e.meal === m).map((e: Entry) => applyQty({ ...e, qty: 1, name: e.name.replace(/\s*×[\d.]+$/, "") }, qn))); flash(`已添加${m} ×${formatQty(qn)}，可撤销`); }} />)}</div>}
+            {!rtEdit && <MealCapsules label={`${n} 添加到`} value={addMeal} onChange={(m: string) => placeRoutine(n, es, qn, m)} />}
             {rtEdit && n === edName && tplEditor}
           </div>; })}
         </div>}
