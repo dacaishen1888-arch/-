@@ -176,13 +176,18 @@ describe("carb cycle from the 2026-11-11 measurement", () => {
     expect(t.pMax).toBe(175);
     expect(t.pRef).toBe(174);
     expect(t.p).toBe(160);
-    expect(t.c).toBe(240);
+    expect(t.cMin).toBe(220);
+    expect(t.cMax).toBe(240);
+    expect(t.cRef).toBe(240);
+    expect(t.c).toBe(220);
     expect(t.f).toBe(51);
     expect(t.kcal).toBe(4 * 174 + 4 * 240 + 9 * 51);
     expect(t.kcal).toBe(2115);
     expect(r.pMin).toBe(160);
     expect(r.pMax).toBe(175);
-    expect(r.c).toBe(120);
+    expect(r.cMin).toBe(100);
+    expect(r.cMax).toBe(120);
+    expect(r.c).toBe(100);
     expect(r.f).toBe(61);
     expect(r.kcal).toBe(1725);
     expect(r.kcal).toBeGreaterThan(1700);
@@ -194,7 +199,8 @@ describe("carb cycle from the 2026-11-11 measurement", () => {
     const t = calcTargets({ ...pr, pLo: "170", pHi: "180" }, true);
     expect(t.pMin).toBe(170);
     expect(t.pMax).toBe(180);
-    expect(t.c).toBe(240);
+    expect(t.cMin).toBe(220);
+    expect(t.cRef).toBe(240);
     expect(t.kcal).toBe(2115);
     expect(calcTargets({ ...pr, tk: "2200" }, true).kcal).toBe(2200);
     const w = analyzeWindow({ "2026-11-06": [{ id: 1, meal: "午餐", name: "a", grams: 100, k: 2000, p: 150, c: 200, f: 50 }] }, "2026-11-08", pr);
@@ -225,7 +231,7 @@ describe("v35 protein migration", () => {
     expect(custom.tf).toBe("40");
     expect(custom.rf).toBe("70");
     expect(migrateProteinTargets(PROFILE_DEFAULT)).toEqual(PROFILE_DEFAULT);
-    expect(calcTargets(next, true)).toMatchObject({ pMin: 160, pMax: 175, c: 200, f: 51 });
+    expect(calcTargets(next, true)).toMatchObject({ pMin: 160, pMax: 175, cMin: 220, cRef: 200, f: 51 });
     expect(calcTargets(custom, true)).toMatchObject({ pMin: 170, pMax: 180, f: 40 });
   });
 });
@@ -277,7 +283,7 @@ describe("carb-cycle analytics", () => {
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v38", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v38"');
+  it("bumps the cache to ct-v39", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v39"');
   });
 });

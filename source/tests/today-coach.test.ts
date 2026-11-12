@@ -14,7 +14,7 @@ describe("today analysis", () => {
   it("shows what is left against the training-day target and suggests carbs plus protein", () => {
     const tot = { k: 800, p: 40, c: tg.c - 80, f: tg.f * 0.9 };
     const a = todayAnalysis(tot, tg, true, 9);
-    expect(a.lines.find((l) => l.name === "碳水")?.text).toBe("碳水还差 80g");
+    expect(a.lines.find((l) => l.name === "碳水")?.text).toBe("碳水还差 80g 到最低");
     expect(a.lines.find((l) => l.name === "脂肪")?.text).toMatch(/脂肪已到 90%/);
     expect(a.lines.find((l) => l.name === "热量")?.text).toContain("还可吃");
     expect(a.advice).toContain("少油");
