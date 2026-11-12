@@ -20,8 +20,8 @@ describe("must-reach highlights", () => {
     expect(train.lines.find((l) => l.name === "脂肪")?.tone).not.toBe("must");
     const restDay = todayAnalysis({ k: 500, p: 40, c: 20, f: 10 }, rest, false, 9);
     expect(restDay.lines.find((l) => l.name === "蛋白")?.must).toBe(true);
-    expect(restDay.lines.find((l) => l.name === "碳水")).toMatchObject({ must: false, tone: "ok" });
-    expect(restDay.lines.find((l) => l.name === "碳水")?.text).toContain("还可吃");
+    expect(restDay.lines.find((l) => l.name === "碳水")).toMatchObject({ must: true, tone: "must" });
+    expect(restDay.lines.find((l) => l.name === "碳水")?.text).toContain("到最低");
   });
   it("turns a reached must-hit macro green and only warns ceilings when they are over", () => {
     const done = todayAnalysis({ k: tg.kcal + 20, p: tg.p, c: tg.c + 5, f: tg.f + 3 }, tg, true, 12);

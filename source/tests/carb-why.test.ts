@@ -7,15 +7,17 @@ const rest = calcTargets(PROFILE_DEFAULT, false);
 describe("carb reassurance copy", () => {
   it("fills the calorie line from the current training or rest targets", () => {
     const day = carbWhy(train, true).join("\n");
-    const sum = r0(train.pRef * 4 + train.c * 4 + train.f * 9);
-    expect(day).toContain(`训练日 蛋白${train.pRef}g×4 + 碳水${train.c}g×4 + 脂肪${train.f}g×9 = ${sum} kcal`);
+    const sum = r0(train.pRef * 4 + train.cRef * 4 + train.f * 9);
+    expect(day).toContain(`训练日 蛋白${train.pRef}g×4 + 碳水${train.cRef}g×4 + 脂肪${train.f}g×9 = ${sum} kcal`);
+    expect(day).toContain(`${train.cMin}–${train.cMax}g`);
     expect(day).toContain(`${train.pMin}–${train.pMax}g`);
     expect(day).toContain(`到 ${train.pMin}g 就算吃够`);
     expect(day).toContain(`低于消耗约 ${r0(train.tdee - train.kcal)} kcal`);
     expect(day).toContain("不会变成腹部脂肪");
     const off = carbWhy(rest, false).join("\n");
-    expect(off).toContain(`休息日 蛋白${rest.pRef}g×4 + 碳水${rest.c}g×4 + 脂肪${rest.f}g×9`);
-    expect(off).not.toContain(`碳水${train.c}g`);
+    expect(off).toContain(`休息日 蛋白${rest.pRef}g×4 + 碳水${rest.cRef}g×4 + 脂肪${rest.f}g×9`);
+    expect(off).toContain(`${rest.cMin}–${rest.cMax}g`);
+    expect(off).not.toContain(`碳水${train.cRef}g`);
   });
 
   it("follows an overridden target instead of the default 2115 formula", () => {
@@ -24,7 +26,8 @@ describe("carb reassurance copy", () => {
     expect(tg.pMin).toBe(150);
     expect(tg.pMax).toBe(170);
     expect(tg.pRef).toBe(174);
-    expect(tg.c).toBe(180);
+    expect(tg.cRef).toBe(180);
+    expect(tg.cMin).toBe(220);
     expect(tg.f).toBe(40);
     const text = carbWhy(tg, true).join("\n");
     expect(text).toContain("蛋白174g×4 + 碳水180g×4 + 脂肪40g×9");
@@ -75,6 +78,13 @@ describe("compact today chips and the hold-to-read tip", () => {
     expect(train.f).toBe(51);
     expect(a.lines.map((l) => l.chip)).toEqual(["还可吃715", `还差${train.pMin - 90}g`, "还差75g", `还可吃${train.f - 20}g`]);
     expect(a.lines.find((l) => l.name === "蛋白")).toMatchObject({ tone: "must", text: `蛋白还差 ${train.pMin - 90}g 到下限` });
+    expect(a.lines.find((l) => l.name === "碳水")).toMatchObject({ tone: "must", text: `碳水还差 75g 到最低` });
+    const carbIn = todayAnalysis({ k: 1400, p: 160, c: 230, f: 20 }, train, true, 12).lines.find((l) => l.name === "碳水");
+    expect(carbIn).toMatchObject({ tone: "done", chip: "已吃够" });
+    const carbHigh = todayAnalysis({ k: 1400, p: 160, c: 250, f: 20 }, train, true, 12).lines.find((l) => l.name === "碳水");
+    expect(carbHigh).toMatchObject({ tone: "near", chip: "略超10g" });
+    const restLow = todayAnalysis({ k: 1000, p: 160, c: 90, f: 20 }, rest, false, 12).lines.find((l) => l.name === "碳水");
+    expect(restLow).toMatchObject({ tone: "must", text: "碳水还差 10g 到最低" });
     const inside = todayAnalysis({ k: 1400, p: 168, c: train.c, f: 20 }, train, true, 12).lines.find((l) => l.name === "蛋白");
     expect(inside).toMatchObject({ tone: "done", chip: "已吃够" });
     const high = todayAnalysis({ k: 1400, p: 180, c: train.c, f: 20 }, train, true, 12).lines.find((l) => l.name === "蛋白");

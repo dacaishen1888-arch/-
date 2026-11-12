@@ -1086,9 +1086,17 @@ function MealCapsules({ value, onChange, label }: { value: string; onChange: (m:
   return <div className="ct-mcaps" role="group" aria-label={label}>{MEALS.map((m: string) => <button type="button" key={m} className={m === value ? "on" : ""} aria-pressed={m === value} style={m === value ? { background: MEAL_C[m], borderColor: MEAL_C[m], color: "#0b0b0b" } : { color: MEAL_C[m], borderColor: `${MEAL_C[m]}88` }} onClick={() => onChange(m)}>{m}</button>)}</div>;
 }
 
-function GroupAvg({ title, g }: { title: string; g: { days: number; k: number; p: number; c: number; f: number; targetK: number; targetP: number; targetPMax: number; targetC: number; targetF: number; adherence: number } }) {
+function GroupAvg({ title, g }: { title: string; g: { days: number; k: number; p: number; c: number; f: number; targetK: number; targetP: number; targetPMax: number; targetC: number; targetCMax: number; targetF: number; adherence: number } }) {
   if (!g.days) return <p className="ct-note">{`没有已记录的${title}。`}</p>;
-  return <div className="ct-group" data-testid={`avg-${title}`}><b>{`${title}均 · ${g.days} 天 · 热量 ${g.adherence}%`}</b><p className="ct-note">{`热量 ${g.k}/${g.targetK} kcal · 蛋白 ${g.p}/${proteinBand(g.targetP, g.targetPMax)} g · 碳水 ${g.c}/${g.targetC} g · 脂肪 ${g.f}/${g.targetF} g`}</p></div>;
+  return <div className="ct-group" data-testid={`avg-${title}`}><b>{`${title}均 · ${g.days} 天 · 热量 ${g.adherence}%`}</b><p className="ct-note">{`热量 ${g.k}/${g.targetK} kcal · 蛋白 ${g.p}/${proteinBand(g.targetP, g.targetPMax)} g · 碳水 ${g.c}/${proteinBand(g.targetC, g.targetCMax)} g · 脂肪 ${g.f}/${g.targetF} g`}</p></div>;
+}
+
+function QtyFold({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
+  const [open, setOpen] = useState(false);
+  return <Fragment>
+    <button type="button" className={`ct-qnow${open ? " on" : ""}`} aria-expanded={open} aria-label={`${label} 数量`} onClick={() => setOpen((v) => !v)}>{formatQty(value)}</button>
+    {open ? <QtyPicker label={label} value={value} onChange={onChange} /> : null}
+  </Fragment>;
 }
 
 function QtyPicker({ value, onChange, label }: { value: number; onChange: (n: number) => void; label: string }) {
@@ -1403,7 +1411,7 @@ export default function App() {
     </div>
     <div className="ct-sub" style={{ marginTop: 4 }}>补剂</div>
     <div className={spEdit ? "ct-g3 ct-edg" : "ct-supp"}>
-      {spEdit ? suppList.map((it: SuppItem) => <div key={it.n} className="ct-pill ct-ed"><button type="button" className="ct-edl" aria-label={`编辑补剂 ${it.n}`} onClick={() => askSupp(it)}><span>{it.n}</span></button><button type="button" className="ct-del" aria-label={`删除补剂 ${it.n}`} onClick={() => delSupp(it)}>🗑</button></div>) : suppList.map((it: SuppItem) => { const on = sp1.includes(it.n); const logged = entries.find((e: Entry) => isSuppLog(e, it)); const q = on && logged?.qty ? logged.qty : (pickQty["s:" + it.n] ?? 1); return <div key={it.n} className="ct-srow" data-testid={`supp-${it.n}`}><button type="button" className={`ct-pill ct-chip${on ? " on" : ""}`} aria-pressed={on} onClick={() => togSupp(it.n, q)}>{on && chk}<span>{it.n}</span></button><QtyPicker label={it.n} value={q} onChange={(n: number) => on ? setSuppAmount(it, n) : setPickQty((M) => ({ ...M, ["s:" + it.n]: n }))} /></div>; })}
+      {spEdit ? suppList.map((it: SuppItem) => <div key={it.n} className="ct-pill ct-ed"><button type="button" className="ct-edl" aria-label={`编辑补剂 ${it.n}`} onClick={() => askSupp(it)}><span>{it.n}</span></button><button type="button" className="ct-del" aria-label={`删除补剂 ${it.n}`} onClick={() => delSupp(it)}>🗑</button></div>) : suppList.map((it: SuppItem) => { const on = sp1.includes(it.n); const logged = entries.find((e: Entry) => isSuppLog(e, it)); const q = on && logged?.qty ? logged.qty : (pickQty["s:" + it.n] ?? 1); return <div key={it.n} className="ct-srow" data-testid={`supp-${it.n}`}><button type="button" className={`ct-pill ct-chip${on ? " on" : ""}`} aria-pressed={on} onClick={() => togSupp(it.n, q)}>{on && chk}<span>{it.n}</span></button><QtyFold label={it.n} value={q} onChange={(n: number) => on ? setSuppAmount(it, n) : setPickQty((M) => ({ ...M, ["s:" + it.n]: n }))} /></div>; })}
       {spEdit && <button type="button" className="ct-pill ct-add" onClick={() => askSupp()}><span>+ 补剂</span></button>}
     </div>
   </div>;
@@ -1430,7 +1438,7 @@ export default function App() {
       {tab === "log" && <div className="ct-card ct-ana" data-testid="today-analysis">
           <div className="ct-chead"><h2 className="ct-ctitle">今日分析</h2><span className="ct-ana-side"><WhyTip lines={carbWhy(tg, train)} /><span className={`ct-cycle${train ? "" : " rest"}`}>{train ? "训练日·高碳" : "休息日·低碳"}</span></span></div>
           <div className="ct-chips" data-testid="today-chips">
-            {coach.lines.map((l) => <div key={l.name} className={`ct-chip ${l.tone}`} data-macro={l.name} data-must={l.must ? "1" : "0"} data-done={l.done ? "1" : "0"} aria-label={l.text}><span>{l.name}{l.must && !l.done ? <em className="ct-bi">必</em> : null}</span><b>{l.chip}</b>{l.name === "蛋白" && l.tone === "must" ? <small className="ct-floor">到下限</small> : null}</div>)}
+            {coach.lines.map((l) => <div key={l.name} className={`ct-chip ${l.tone}`} data-macro={l.name} data-must={l.must ? "1" : "0"} data-done={l.done ? "1" : "0"} aria-label={l.text}><span>{l.name}{l.must && !l.done ? <em className="ct-bi">必</em> : null}</span><b>{l.chip}</b>{l.tone === "must" && l.name === "蛋白" ? <small className="ct-floor">到下限</small> : l.tone === "must" && l.name === "碳水" ? <small className="ct-floor">到最低</small> : null}</div>)}
           </div>
           <p className="ct-advice" data-testid="today-advice">{coach.advice}</p>
         </div>}
@@ -1555,7 +1563,7 @@ export default function App() {
         <button type="button" className="ct-rthd" aria-expanded={rtOpen} onClick={() => setRtOpen(!rtOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", minHeight: 44, marginTop: 12, padding: "10px 0 0", background: "none", border: "none", borderTop: "1px solid rgba(255,255,255,.08)", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left" }}><span>{`我的常规 (${Object.keys(tpls).length})`}</span><span className="ct-chev" style={{ transform: rtOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }}>›</span></button>
         {rtOpen && <div className="ct-rtbody" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
           {routine.length > 0 && <div className="ct-quick" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <QtyPicker label={rkey || "常规"} value={pickQty["t:" + rkey] ?? 1} onChange={(n: number) => setPickQty((M) => ({ ...M, ["t:" + rkey]: n }))} /><MealCapsules label={`${rkey} 添加到`} value={addMeal} onChange={(m: string) => placeRoutine(rkey, routine, pickQty["t:" + rkey] ?? 1, m)} /><Btn label={`⚡ 添加到${addMeal}「${rkey}」×${formatQty(pickQty["t:" + rkey] ?? 1)}`} variant="primary" full onClick={() => placeRoutine(rkey, routine, pickQty["t:" + rkey] ?? 1, addMeal)} />
+          <div className="ct-srow"><span className="ct-pill"><span>{rkey}</span></span><QtyFold label={rkey || "常规"} value={pickQty["t:" + rkey] ?? 1} onChange={(n: number) => setPickQty((M) => ({ ...M, ["t:" + rkey]: n }))} /></div><MealCapsules label={`${rkey} 添加到`} value={addMeal} onChange={(m: string) => placeRoutine(rkey, routine, pickQty["t:" + rkey] ?? 1, m)} /><Btn label={`⚡ 添加到${addMeal}「${rkey}」×${formatQty(pickQty["t:" + rkey] ?? 1)}`} variant="primary" full onClick={() => placeRoutine(rkey, routine, pickQty["t:" + rkey] ?? 1, addMeal)} />
           </div>}
           <div id="rt-sec" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {Object.keys(tpls).length > 0 && <Btn label={rtEdit ? "✓ 完成" : "✎ 编辑"} variant={rtEdit ? "primary" : "quiet"} onClick={() => { setRtEdit(!rtEdit); setEdName(""); }} />}
@@ -1564,16 +1572,12 @@ export default function App() {
           </div>
           {Object.keys(tpls).length === 0 && <Text>还没有常规。点“+ 新建常规”起个名字，再搜索食物加入；之后一键添加到今天。</Text>}
           {Object.keys(tpls).map((n: string) => { const es = Array.isArray(tpls[n]) ? tpls[n] : []; const qn = pickQty["t:" + n] ?? 1; const addAll = () => placeRoutine(n, es, qn, addMeal);
-            return <div key={n} data-tpl={n} style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, border: `1px solid ${n === edName ? th.text.primary : th.border.default}`, borderRadius: 12 }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <div role={rtEdit ? undefined : "button"} onClick={rtEdit ? undefined : addAll} style={{ flex: "1 1 auto", minWidth: 0, minHeight: 44, display: "flex", flexDirection: "column", justifyContent: "center", cursor: rtEdit ? "default" : "pointer" }}>
-                <span style={{ color: th.text.primary, fontWeight: 600 }}>{`${n}${n === tplDef.train ? " 🏋" : ""}${n === tplDef.rest ? " 🛋" : ""}`}</span>
-                <span style={{ color: th.text.secondary, fontSize: 13 }}>{`${es.length}项 · ${r0(tk(es) * qn)}kcal · 蛋白${r0(tp(es) * qn)}g · ×${formatQty(qn)}${rtEdit ? "" : " · 点餐次即添加"}`}</span>
-              </div>
-              {rtEdit && <button type="button" className="ct-tb" aria-label={`编辑 ${n}`} onClick={(ev: { stopPropagation: () => void }) => { ev.stopPropagation(); if (n === edName) setEdName(""); else { setEdName(n); setEdNew(n); } }}>✎</button>}
-              {rtEdit && <button type="button" className="ct-tb ct-tb-del" aria-label={`删除 ${n}`} onClick={(ev: { stopPropagation: () => void }) => { ev.stopPropagation(); delTpl(n); }}>🗑</button>}
-            </div>
-            {!rtEdit && <QtyPicker label={n} value={qn} onChange={(v: number) => setPickQty((M) => ({ ...M, ["t:" + n]: v }))} />}
+            return <div key={n} data-tpl={n} className="ct-srow" style={{ border: n === edName ? `1px solid ${th.text.primary}` : undefined, borderRadius: 12, padding: n === edName ? 8 : undefined }}>
+            <button type="button" className="ct-pill" onClick={rtEdit ? undefined : addAll}><span>{`${n}${n === tplDef.train ? " 🏋" : ""}${n === tplDef.rest ? " 🛋" : ""}`}</span></button>
+            {!rtEdit && <QtyFold label={n} value={qn} onChange={(v: number) => setPickQty((M) => ({ ...M, ["t:" + n]: v }))} />}
+            {rtEdit && <button type="button" className="ct-tb" aria-label={`编辑 ${n}`} onClick={() => { if (n === edName) setEdName(""); else { setEdName(n); setEdNew(n); } }}>✎</button>}
+            {rtEdit && <button type="button" className="ct-tb ct-tb-del" aria-label={`删除 ${n}`} onClick={() => delTpl(n)}>🗑</button>}
+            {!rtEdit && <span className="ct-sub" style={{ flex: "1 1 100%" }}>{`${es.length}项 · ${r0(tk(es) * qn)}kcal · 点餐次即添加`}</span>}
             {!rtEdit && <MealCapsules label={`${n} 添加到`} value={addMeal} onChange={(m: string) => placeRoutine(n, es, qn, m)} />}
             {rtEdit && n === edName && tplEditor}
           </div>; })}
@@ -1647,7 +1651,7 @@ export default function App() {
                 <div className="ct-day-k">{d.shownK}<small>kcal</small></div>
                 <p className="ct-note">{`目标 ${d.targetK} kcal · ${d.targetSource === "saved" ? "当天保存的目标" : "按当前参数重算"} · ${d.status === "超出" ? `超出 ${d.gap}` : `还剩 ${d.gap}`}`}</p>
                 <p className="ct-note">{`相对当天目标 ${d.adherence}%`}</p>
-                <p className="ct-note"><span className={d.p + 1e-6 < d.targetPMin ? "ct-must" : d.p > d.targetPMax ? "ct-soft" : "ct-done"}>{`蛋白 ${r0(d.p)}/${proteinBand(d.targetPMin, d.targetPMax)}g ${d.p + 1e-6 < d.targetPMin ? `还差 ${r0(d.targetPMin - d.p)}g 到下限` : d.p > d.targetPMax ? `略超 ${r0(d.p - d.targetPMax)}g` : "已吃够"}`}</span>{d.train ? <span className={d.c >= d.targetC ? "ct-done" : "ct-must"}>{` · 碳水 ${r0(d.c)}/${d.targetC}g ${d.c >= d.targetC ? "已吃够" : "必须吃够"}`}</span> : ` · 碳水 ${r0(d.c)}/${d.targetC}g 上限`}{` · 脂肪 ${r0(d.f)}/${d.targetF}g 上限`}</p>
+                <p className="ct-note"><span className={d.p + 1e-6 < d.targetPMin ? "ct-must" : d.p > d.targetPMax ? "ct-soft" : "ct-done"}>{`蛋白 ${r0(d.p)}/${proteinBand(d.targetPMin, d.targetPMax)}g ${d.p + 1e-6 < d.targetPMin ? `还差 ${r0(d.targetPMin - d.p)}g 到下限` : d.p > d.targetPMax ? `略超 ${r0(d.p - d.targetPMax)}g` : "已吃够"}`}</span><span className={d.c + 1e-6 < d.targetCMin ? "ct-must" : d.c > d.targetCMax ? "ct-soft" : "ct-done"}>{` · 碳水 ${r0(d.c)}/${proteinBand(d.targetCMin, d.targetCMax)}g ${d.c + 1e-6 < d.targetCMin ? `还差 ${r0(d.targetCMin - d.c)}g 到最低` : d.c > d.targetCMax ? `略超 ${r0(d.c - d.targetCMax)}g` : "已吃够"}`}</span>{` · 脂肪 ${r0(d.f)}/${d.targetF}g 上限`}</p>
               </Fragment>}
             </div>;
           })}
@@ -1707,19 +1711,21 @@ export default function App() {
         </Grid>
         <Text>{`碳循环：训练日高碳保力量，休息日低碳拉缺口，周平均每日缺口约 ${weeklyDeficit(profile)} kcal。`}</Text>
         <Table columns={["", "热量", "蛋白", "碳水", "脂肪"]} rows={[
-          ["训练日·高碳", `${tgT.kcal}`, `${proteinBand(tgT.pMin, tgT.pMax)}g`, `${tgT.c}g`, `${tgT.f}g`],
-          ["休息日·低碳", `${tgR.kcal}`, `${proteinBand(tgR.pMin, tgR.pMax)}g`, `${tgR.c}g`, `${tgR.f}g`],
+          ["训练日·高碳", `${tgT.kcal}`, `${proteinBand(tgT.pMin, tgT.pMax)}g`, `${proteinBand(tgT.cMin, tgT.cMax)}g`, `${tgT.f}g`],
+          ["休息日·低碳", `${tgR.kcal}`, `${proteinBand(tgR.pMin, tgR.pMax)}g`, `${proteinBand(tgR.cMin, tgR.cMax)}g`, `${tgR.f}g`],
         ]} />
         <Text>{`BMR ${tgT.bmr} kcal（${tgT.bmrSource === "measured" ? "使用填写值" : tgT.bmrSource === "katch" ? "Katch-McArdle" : "Mifflin"}）；去脂体重 ${tgT.lbm} kg。TDEE 训练日 ${tgT.tdee}、休息日 ${tgR.tdee} kcal。周一到周五为训练日。`}</Text>
-        <Text>{`蛋白每天 ${proteinBand(tgT.pMin, tgT.pMax)}g，训练日和休息日一样。没到下限算没吃够，上限以内都合适，超过上限只是轻轻提示。热量按蛋白 ${tgT.pRef}g 配平，所以训练日脂肪 ${tgT.f}g、休息日脂肪 ${tgR.f}g，热量仍是 ${tgT.kcal} 和 ${tgR.kcal}。下面留空就用这个区间，填写则覆盖。`}</Text>
+        <Text>{`蛋白每天 ${proteinBand(tgT.pMin, tgT.pMax)}g。训练日碳水 ${proteinBand(tgT.cMin, tgT.cMax)}g，休息日碳水 ${proteinBand(tgR.cMin, tgR.cMax)}g。没到最低是橙色，区间里是绿色，超过最高只轻轻提示。热量仍按蛋白 ${tgT.pRef}g、碳水训练 ${tgT.cRef}g / 休息 ${tgR.cRef}g 配平，所以还是 ${tgT.kcal} 和 ${tgR.kcal}。下面留空就用这些区间。`}</Text>
         <Grid columns={2} plain>
           <NI label="训练日热量覆盖" type="number" value={profile.tk || ""} onChange={setP("tk")} placeholder={String(tgT.kcal)} />
           <NI label="蛋白下限 g" type="number" value={profile.pLo || ""} onChange={setP("pLo")} placeholder={String(tgT.pMin)} />
-          <NI label="训练日碳水 g" type="number" value={profile.tc || ""} onChange={setP("tc")} placeholder={String(tgT.c)} />
+          <NI label="蛋白上限 g" type="number" value={profile.pHi || ""} onChange={setP("pHi")} placeholder={String(tgT.pMax)} />
+          <NI label="训练日碳水最低 g" type="number" value={profile.tcLo || ""} onChange={setP("tcLo")} placeholder={String(tgT.cMin)} />
+          <NI label="训练日碳水最高 g" type="number" value={profile.tcHi || ""} onChange={setP("tcHi")} placeholder={String(tgT.cMax)} />
+          <NI label="休息日碳水最低 g" type="number" value={profile.rcLo || ""} onChange={setP("rcLo")} placeholder={String(tgR.cMin)} />
+          <NI label="休息日碳水最高 g" type="number" value={profile.rcHi || ""} onChange={setP("rcHi")} placeholder={String(tgR.cMax)} />
           <NI label="训练日脂肪 g" type="number" value={profile.tf || ""} onChange={setP("tf")} placeholder={String(tgT.f)} />
           <NI label="休息日热量覆盖" type="number" value={profile.rk || ""} onChange={setP("rk")} placeholder={String(tgR.kcal)} />
-          <NI label="蛋白上限 g" type="number" value={profile.pHi || ""} onChange={setP("pHi")} placeholder={String(tgT.pMax)} />
-          <NI label="休息日碳水 g" type="number" value={profile.rc || ""} onChange={setP("rc")} placeholder={String(tgR.c)} />
           <NI label="休息日脂肪 g" type="number" value={profile.rf || ""} onChange={setP("rf")} placeholder={String(tgR.f)} />
         </Grid>
       </Section>}
@@ -1918,7 +1924,10 @@ select.ct-mini{width:88px}
 .ct-mcaps button.on{font-weight:800}
 .ct-supp{display:flex;flex-direction:column}
 .ct-srow{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid rgba(255,255,255,.06)}
-.ct-srow .ct-pill{flex:0 1 auto;max-width:46%}
+.ct-srow .ct-pill{flex:0 1 auto;max-width:70%}
+.ct-qnow{flex:none;min-width:40px;height:32px;padding:0 10px;border-radius:16px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer}
+.ct-qnow.on{border-color:#ff9f0a;color:#ff9f0a}
+.ct-srow .ct-qty,.ct-srow .ct-mcaps{flex:1 1 100%}
 .ct-ana{padding:10px 12px;overflow:visible}
 .ct-ana .ct-chead{margin-bottom:8px}
 .ct-ana-side{display:flex;align-items:center;gap:6px;min-width:0}
@@ -1960,18 +1969,18 @@ select.ct-mini{width:88px}
 details summary::-webkit-details-marker{display:none}
 `;
 
-function ActRings({ tot, tg, streak }: { tot: { k: number; p: number; c: number; f: number }; tg: { kcal: number; p: number; pMin: number; pMax: number; c: number; f: number }; streak: number }) {
+function ActRings({ tot, tg, streak }: { tot: { k: number; p: number; c: number; f: number }; tg: { kcal: number; p: number; pMin: number; pMax: number; c: number; cMin: number; cMax: number; f: number }; streak: number }) {
   const [on, setOn] = useState(false);
   useEffect(() => { const t = setTimeout(() => setOn(true), 30); return () => clearTimeout(t); }, []);
   const VW = 330, VH = 196, OR = 88, W = 13, cx = 92, cy = 102, LX = 202;
   const rows: [string, string, number, number, string, string, string][] = [
     ["热量", "kcal", tot.k, tg.kcal, "#ff2d55", "#ff6b2c", "#fa114f"],
     ["蛋白", "g", tot.p, tg.pMin, "#92e82a", "#4cd964", "#a6ff00"],
-    ["碳水", "g", tot.c, tg.c, "#1eeaef", "#0a84ff", "#00d8ff"],
+    ["碳水", "g", tot.c, tg.cMin, "#1eeaef", "#0a84ff", "#00d8ff"],
     ["脂肪", "g", tot.f, tg.f, "#ffd60a", "#ff9f0a", "#ffcc00"]];
   const over = tot.k > tg.kcal;
   const RR = (i: number) => OR - W / 2 - i * (W + 2);
-  return <svg width="100%" viewBox={`0 0 ${VW} ${VH}`} style={{ display: "block", maxWidth: 420, margin: "0 auto" }} role="img" aria-label={`热量 ${Math.round(tot.k)}/${tg.kcal}，蛋白 ${Math.round(tot.p)}/${proteinBand(tg.pMin, tg.pMax)}g，碳水 ${Math.round(tot.c)}/${tg.c}g，脂肪 ${Math.round(tot.f)}/${tg.f}g`}>
+  return <svg width="100%" viewBox={`0 0 ${VW} ${VH}`} style={{ display: "block", maxWidth: 420, margin: "0 auto" }} role="img" aria-label={`热量 ${Math.round(tot.k)}/${tg.kcal}，蛋白 ${Math.round(tot.p)}/${proteinBand(tg.pMin, tg.pMax)}g，碳水 ${Math.round(tot.c)}/${proteinBand(tg.cMin, tg.cMax)}g，脂肪 ${Math.round(tot.f)}/${tg.f}g`}>
     <defs>
       {rows.map((r, i) => <linearGradient key={i} id={`rg${i}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor={r[5]} /><stop offset="1" stopColor={r[4]} /></linearGradient>)}
       <filter id="rsh" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="2.2" floodColor="#000" floodOpacity="0.75" /></filter>
@@ -1989,13 +1998,15 @@ function ActRings({ tot, tg, streak }: { tot: { k: number; p: number; c: number;
     })}
     {rows.map((r, i) => {
       const sy = cy - RR(i), ly = 12 + i * 21, pc = Math.round(r[2] / (r[3] || 1) * 100);
-      const gentle = i === 1 && r[2] > tg.pMax;
-      const ov = i === 1 ? gentle : r[2] > r[3];
-      const mark = i === 1 ? proteinBand(tg.pMin, tg.pMax) : String(r[3]);
+      const cap = i === 1 ? tg.pMax : i === 2 ? tg.cMax : r[3];
+      const banded = i === 1 || i === 2;
+      const gentle = banded && r[2] > cap;
+      const ov = banded ? gentle : r[2] > r[3];
+      const mark = i === 1 ? proteinBand(tg.pMin, tg.pMax) : i === 2 ? proteinBand(tg.cMin, tg.cMax) : String(r[3]);
       return <g key={`l${i}`}>
         <path d={`M ${cx} ${sy} L ${cx + 14} ${sy} C ${cx + 40} ${sy} ${LX - 34} ${ly} ${LX - 6} ${ly}`} fill="none" stroke={r[4]} strokeWidth={1.3} strokeLinecap="round" />
         <circle cx={cx} cy={sy} r={2.4} fill="#fff" />
-        <text x={LX} y={ly} dominantBaseline="central" fontSize={i === 1 ? 10.5 : 11.5} style={{ fontVariantNumeric: "tabular-nums" }}>
+        <text x={LX} y={ly} dominantBaseline="central" fontSize={banded ? 10.5 : 11.5} style={{ fontVariantNumeric: "tabular-nums" }}>
           <tspan fill="rgba(255,255,255,.7)">{r[0]}</tspan>
           <tspan dx={4} fill="#fff" fontWeight={700}>{`${Math.round(r[2])}/${mark}${r[1] === "g" ? "g" : ""}`}</tspan>
           <tspan dx={4} fill={gentle ? "#ffb020" : ov ? "#ff453a" : r[4]} fontWeight={800}>{`${pc}%${ov && !gentle ? "↑" : ""}`}</tspan>
