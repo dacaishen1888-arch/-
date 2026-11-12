@@ -63,6 +63,15 @@ export function lastNDays(end: string, n = 7): string[] {
   return Array.from({ length: n }, (_, i) => addDays(end, i - (n - 1)));
 }
 
+export function mondayOf(iso: string): string {
+  const w = weekday(iso);
+  return addDays(iso, w === 0 ? -6 : 1 - w);
+}
+
+export function weekDates(monday: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
 function opt(v: string | undefined, fallback: number): number {
   if (v == null || String(v).trim() === "") return fallback;
   const n = parseFloat(v);
@@ -448,8 +457,8 @@ function groupAvg(rows: readonly DayStat[]): GroupAvg {
   return { days: rows.length, k: avgOf(rows, "k"), p: avgOf(rows, "p"), c: avgOf(rows, "c"), f: avgOf(rows, "f"), targetK: avgOf(rows, "targetK"), targetP: avgOf(rows, "targetP"), targetPMax: avgOf(rows, "targetPMax"), targetC: avgOf(rows, "targetC"), targetCMax: avgOf(rows, "targetCMax"), targetF: avgOf(rows, "targetF"), adherence };
 }
 
-export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>, end: string, profile: Profile, saved?: Record<string, Partial<SavedDayTarget> | undefined>): WindowStats {
-  const days: DayStat[] = lastNDays(end, 7).map((date) => {
+export function analyzeDates(log: Record<string, readonly Entry[] | undefined>, dates: readonly string[], profile: Profile, saved?: Record<string, Partial<SavedDayTarget> | undefined>): WindowStats {
+  const days: DayStat[] = dates.map((date) => {
     const es = log[date] || [];
     const s = sumEntries(es);
     const train = isTrain(date);
@@ -496,6 +505,10 @@ export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>,
   };
 }
 
+export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>, end: string, profile: Profile, saved?: Record<string, Partial<SavedDayTarget> | undefined>): WindowStats {
+  return analyzeDates(log, lastNDays(end, 7), profile, saved);
+}
+
 export type WeekDayBalance = {
   date: string;
   train: boolean;
@@ -514,6 +527,7 @@ export type WeekDayBalance = {
   fatGap: number;
   proteinHit: boolean;
   carbHit: boolean;
+  future: boolean;
 };
 
 export type WeekBalance = {
@@ -546,6 +560,7 @@ export type WeekBalance = {
   pTone: MacroTone;
   cTone: MacroTone;
   fTone: MacroTone;
+  partial: boolean;
 };
 
 export type MacroTone = "ok" | "low" | "high";
@@ -560,21 +575,25 @@ function capTone(actual: number, cap: number): MacroTone {
   return actual > cap + 1e-6 ? "high" : "ok";
 }
 
-export function weekBalance(w: WindowStats): WeekBalance {
+export function weekBalance(w: WindowStats, today?: string): WeekBalance {
   const days: WeekDayBalance[] = w.days.map((d) => {
     const logged = d.entries > 0;
+    const future = Boolean(today && d.date > today);
     return {
-      date: d.date, train: d.train, logged, p: d.p, c: d.c, f: d.f, k: d.k,
+      date: d.date, train: d.train, logged, future, p: d.p, c: d.c, f: d.f, k: d.k,
       pMin: d.targetPMin, pMax: d.targetPMax, cMin: d.targetCMin, cMax: d.targetCMax, targetF: d.targetF, targetK: d.targetK,
-      carbGap: logged ? d.c - d.targetCMin : 0,
-      fatGap: logged ? d.f - d.targetF : 0,
-      proteinHit: logged && d.p + 1e-6 >= d.targetPMin,
-      carbHit: logged && d.c + 1e-6 >= d.targetCMin,
+      carbGap: logged && !future ? d.c - d.targetCMin : 0,
+      fatGap: logged && !future ? d.f - d.targetF : 0,
+      proteinHit: logged && !future && d.p + 1e-6 >= d.targetPMin,
+      carbHit: logged && !future && d.c + 1e-6 >= d.targetCMin,
     };
   });
-  const loggedDays = days.filter((d) => d.logged);
-  const kcalActual = r0(loggedDays.reduce((a, d) => a + d.k, 0));
-  const kcalTarget = r0(loggedDays.reduce((a, d) => a + d.targetK, 0));
+  const partial = days.some((d) => d.future);
+  const elapsed = today ? days.filter((d) => !d.future) : null;
+  const loggedDays = (elapsed ?? days).filter((d) => d.logged);
+  const basis = elapsed ?? loggedDays;
+  const kcalActual = r0(basis.reduce((a, d) => a + d.k, 0));
+  const kcalTarget = r0(basis.reduce((a, d) => a + d.targetK, 0));
   const kcalNet = kcalTarget - kcalActual;
   const fatOverG = r0(loggedDays.reduce((a, d) => a + Math.max(0, d.fatGap), 0));
   const carbShortG = r0(loggedDays.reduce((a, d) => a + Math.max(0, -d.carbGap), 0));
@@ -593,21 +612,21 @@ export function weekBalance(w: WindowStats): WeekBalance {
   const overPct = kcalTarget > 0 && (kcalActual - kcalTarget) / kcalTarget > 0.05;
   const badge: WeekBalance["badge"] = !loggedDays.length ? "未记录" : overPct ? "偏高" : "平衡";
   const bar: WeekBalance["bar"] = overPct ? "high" : "ok";
-  const p = r0(loggedDays.reduce((a, d) => a + d.p, 0));
-  const c = r0(loggedDays.reduce((a, d) => a + d.c, 0));
-  const f = r0(loggedDays.reduce((a, d) => a + d.f, 0));
-  const pMin = r0(loggedDays.reduce((a, d) => a + d.pMin, 0));
-  const cMin = r0(loggedDays.reduce((a, d) => a + d.cMin, 0));
-  const fTarget = r0(loggedDays.reduce((a, d) => a + d.targetF, 0));
-  const pMax = r0(loggedDays.reduce((a, d) => a + d.pMax, 0));
-  const cMax = r0(loggedDays.reduce((a, d) => a + d.cMax, 0));
+  const p = r0(basis.reduce((a, d) => a + d.p, 0));
+  const c = r0(basis.reduce((a, d) => a + d.c, 0));
+  const f = r0(basis.reduce((a, d) => a + d.f, 0));
+  const pMin = r0(basis.reduce((a, d) => a + d.pMin, 0));
+  const cMin = r0(basis.reduce((a, d) => a + d.cMin, 0));
+  const fTarget = r0(basis.reduce((a, d) => a + d.targetF, 0));
+  const pMax = r0(basis.reduce((a, d) => a + d.pMax, 0));
+  const cMax = r0(basis.reduce((a, d) => a + d.cMax, 0));
   const pTone = bandTone(p, pMin, pMax);
   const cTone = bandTone(c, cMin, cMax);
   const fTone = capTone(f, fTarget);
   const reason = !loggedDays.length ? "这 7 天还没有饮食记录" : kcalNet > 0 ? `热量缺口 −${kcalNet} kcal` : kcalNet < 0 ? `超出 +${-kcalNet} kcal` : "热量缺口 −0 kcal";
   const warn = loggedDays.length && trainCarbShort && fatOverG >= 10 ? "脂肪多吃挤掉了碳水，训练日先吃够碳水" : "";
   const conclusion = reason;
-  return { days, logged: loggedDays.length, kcalActual, kcalTarget, kcalNet, fatOverG, fatOverKcal, carbShortG, carbShortKcal, offset, tradeoff, conclusion, badge, bar, reason, warn, proteinHits, proteinOk, p, pMin, pMax, c, cMin, cMax, f, fTarget, pTone, cTone, fTone };
+  return { days, logged: loggedDays.length, kcalActual, kcalTarget, kcalNet, fatOverG, fatOverKcal, carbShortG, carbShortKcal, offset, tradeoff, conclusion, badge, bar, reason, warn, proteinHits, proteinOk, p, pMin, pMax, c, cMin, cMax, f, fTarget, pTone, cTone, fTone, partial };
 }
 
 export function streakCount(log: Record<string, readonly unknown[] | undefined>, today: string): number {

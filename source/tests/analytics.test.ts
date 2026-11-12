@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
-import { addDays, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weeklyDeficit, migrateProteinTargets, weekBalance, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
+import { addDays, analyzeDates, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, mondayOf, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weekDates, weeklyDeficit, migrateProteinTargets, weekBalance, weekday, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
 
 const profile: Profile = { h: "170", w: "82", age: "34", bf: "", act: "1.6", def: "18" };
 const e = (id: number, k: number, p: number, c = 0, f = 0, grams = 100): Entry => ({ id, meal: "午餐", name: "食物", grams, k, p, c, f });
@@ -365,8 +365,44 @@ describe("week balance", () => {
   });
 });
 
+describe("natural week", () => {
+  const pr = PROFILE_DEFAULT;
+  const train = calcTargets(pr, true);
+  const rest = calcTargets(pr, false);
+  const food = (id: number, k: number, p: number, c: number, f: number): Entry => ({ id, meal: "午餐", name: "a", grams: 100, k, p, c, f });
+  it("starts on Monday and ends on Sunday, including a Sunday boundary", () => {
+    expect(mondayOf("2026-11-09")).toBe("2026-11-09");
+    expect(weekday("2026-11-09")).toBe(1);
+    expect(mondayOf("2026-11-15")).toBe("2026-11-09");
+    expect(weekday("2026-11-15")).toBe(0);
+    expect(mondayOf("2026-11-08")).toBe("2026-11-02");
+    const days = weekDates("2026-11-09");
+    expect(days).toEqual(["2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13", "2026-11-14", "2026-11-15"]);
+    expect(days.map(weekday)).toEqual([1, 2, 3, 4, 5, 6, 0]);
+  });
+  it("leaves future days out of the target and still counts elapsed days without a log", () => {
+    const w = analyzeDates({
+      "2026-11-09": [food(1, train.kcal - 100, train.pMin, train.cMin, train.f)],
+      "2026-11-14": [food(2, rest.kcal, rest.pMin, rest.cMin, rest.f)],
+    }, weekDates("2026-11-09"), pr);
+    const mid = weekBalance(w, "2026-11-11");
+    expect(mid.days.map((d) => d.future)).toEqual([false, false, false, true, true, true, true]);
+    expect(mid.partial).toBe(true);
+    expect(mid.kcalTarget).toBe(train.kcal * 3);
+    expect(mid.kcalActual).toBe(train.kcal - 100);
+    expect(mid.pMin).toBe(train.pMin * 3);
+    expect(mid.logged).toBe(1);
+    const done = weekBalance(w, "2026-11-16");
+    expect(done.partial).toBe(false);
+    expect(done.days.every((d) => !d.future)).toBe(true);
+    expect(done.kcalTarget).toBe(train.kcal * 5 + rest.kcal * 2);
+    expect(done.kcalActual).toBe(train.kcal - 100 + rest.kcal);
+    expect(done.logged).toBe(2);
+  });
+});
+
 describe("service worker", () => {
-  it("bumps the cache to ct-v43", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v43"');
+  it("bumps the cache to ct-v44", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v44"');
   });
 });

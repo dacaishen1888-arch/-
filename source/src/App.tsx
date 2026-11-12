@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, proteinBand, r0, scaleEntryGrams, scaleEntryKcal, seenReminders, shanghaiClock, shanghaiToday, streakCount, suggestMeal, todayAnalysis, weekBalance, weekday, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, proteinBand, r0, scaleEntryGrams, scaleEntryKcal, seenReminders, shanghaiClock, shanghaiToday, streakCount, suggestMeal, todayAnalysis, weekBalance, weekday, weekDates, mondayOf, analyzeDates, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1132,7 +1132,7 @@ function WeekRing({ wb }: { wb: ReturnType<typeof weekBalance> }) {
   </svg>;
 }
 
-function DayRings({ d }: { d: { logged: boolean; p: number; pMin: number; pMax: number; c: number; cMin: number; cMax: number; f: number; targetF: number } }) {
+function DayRings({ d }: { d: { logged: boolean; future: boolean; p: number; pMin: number; c: number; cMin: number; f: number; targetF: number } }) {
   const rows = [
     { actual: d.p, min: d.pMin, color: "#92e82a" },
     { actual: d.c, min: d.cMin, color: "#1eeaef" },
@@ -1141,19 +1141,34 @@ function DayRings({ d }: { d: { logged: boolean; p: number; pMin: number; pMax: 
   return <svg viewBox="0 0 36 36" width="100%" aria-hidden="true">
     {rows.map((r, i) => {
       const radius = 15.4 - i * 4.6, C = 2 * Math.PI * radius;
-      const frac = d.logged && r.min > 0 ? Math.min(1, Math.max(0, r.actual / r.min)) : 0;
+      const frac = d.logged && !d.future && r.min > 0 ? Math.min(1, Math.max(0, r.actual / r.min)) : 0;
       return <g key={i}>
-        <circle cx={18} cy={18} r={radius} fill="none" stroke={d.logged ? r.color : "#3a3a3c"} strokeOpacity={d.logged ? 0.22 : 1} strokeWidth={3} />
+        <circle cx={18} cy={18} r={radius} fill="none" stroke={d.future ? "#8e8e93" : d.logged ? r.color : "#3a3a3c"} strokeOpacity={d.future ? 0.35 : d.logged ? 0.22 : 1} strokeWidth={d.future ? 1.5 : 3} strokeDasharray={d.future ? "1.4 2.1" : undefined} />
         {frac > 0 && <circle cx={18} cy={18} r={radius} fill="none" stroke={r.color} strokeWidth={3} strokeLinecap="round" strokeDasharray={`${C * frac} ${C}`} transform="rotate(-90 18 18)" />}
       </g>;
     })}
   </svg>;
 }
 
-function WeekPanel({ wb, onPick }: { wb: ReturnType<typeof weekBalance>; onPick: (iso: string) => void }) {
-  return <div className="ct-wcard" data-testid="week-panel">
+function zhMonthDay(iso: string): string {
+  return `${Number(iso.slice(5, 7))}月${Number(iso.slice(8))}日`;
+}
+
+function WeekPanel({ log, profile, saved, today, onPick }: { log: Record<string, Entry[]>; profile: Profile; saved: Record<string, Partial<SavedDayTarget>>; today: string; onPick: (iso: string) => void }) {
+  const [monday, setMonday] = useState(() => mondayOf(today));
+  const drag = useRef<number | null>(null);
+  const dates = weekDates(monday);
+  const wb = useMemo(() => weekBalance(analyzeDates(log, dates, profile, saved), today), [log, dates, profile, saved, today]);
+  const atNow = monday >= mondayOf(today);
+  const shift = (n: number) => setMonday((cur) => { const next = addDays(cur, n * 7); return next > mondayOf(today) ? cur : next; });
+  return <div className="ct-wcard" data-testid="week-panel" onPointerDown={(ev) => { if ((ev.target as HTMLElement).closest("button")) return; drag.current = ev.clientX; }} onPointerUp={(ev) => { if (drag.current == null) return; const dx = ev.clientX - drag.current; drag.current = null; if (dx > 48) shift(-1); else if (dx < -48) shift(1); }} onPointerCancel={() => { drag.current = null; }}>
+    <div className="ct-wnav">
+      <button type="button" aria-label="上一周" onClick={() => shift(-1)}>‹</button>
+      <div><b>{`${zhMonthDay(dates[0])}–${zhMonthDay(dates[6])}`}</b>{wb.partial ? <small>截至今天</small> : null}</div>
+      <button type="button" aria-label="下一周" disabled={atNow} onClick={() => shift(1)}>›</button>
+    </div>
     <WeekRing wb={wb} />
-    <div className="ct-wrings" aria-label="每天完成度">{wb.days.map((d) => <button type="button" key={d.date} data-date={d.date} aria-label={`查看 ${d.date} 周${WEEKDAYS[weekday(d.date)]}`} onClick={() => onPick(d.date)}><DayRings d={d} /><span>{`周${WEEKDAYS[weekday(d.date)]}`}</span></button>)}</div>
+    <div className="ct-wrings" aria-label="每天完成度">{wb.days.map((d) => <button type="button" key={d.date} className={d.future ? "future" : ""} data-date={d.date} data-future={d.future ? "1" : "0"} aria-label={`查看 ${d.date} 周${WEEKDAYS[weekday(d.date)]}`} onClick={() => onPick(d.date)}><DayRings d={d} /><span>{`周${WEEKDAYS[weekday(d.date)]}`}</span></button>)}</div>
     {wb.warn ? <p className="ct-whint" data-testid="week-warn">{wb.warn}</p> : null}
   </div>;
 }
@@ -1695,7 +1710,7 @@ export default function App() {
       <Fragment><div className="ct-card" data-testid="ana-card" data-end={date} data-logged={loggedN} data-avgk={ana.avgKLogged} data-over={ana.overCount}>
         <div className="ct-chead"><h2 className="ct-ctitle">{`近7天 · ${ana.days[0] ? `${Number(ana.days[0].date.slice(5, 7))}月${Number(ana.days[0].date.slice(8))}日` : ""} 至 ${Number(date.slice(5, 7))}月${Number(date.slice(8))}日`}</h2></div>
         <div className="ct-seg2" role="group" aria-label="分析范围"><button type="button" className={weekOn ? "" : "on"} aria-pressed={!weekOn} onClick={() => setWeekOn(false)}>每日</button><button type="button" className={weekOn ? "on" : ""} aria-pressed={weekOn} onClick={() => setWeekOn(true)}>一周</button></div>
-        {weekOn ? <WeekPanel wb={weekBalance(ana)} onPick={(iso) => { setDate(iso); setWeekOn(false); }} /> : <div data-testid="day-view">
+        {weekOn ? <WeekPanel log={log} profile={profile} saved={savedTargets} today={today} onPick={(iso) => { setDate(iso); setWeekOn(false); }} /> : <div data-testid="day-view">
         <p className="ct-note">每一天只和自己的目标比，规则与今日圆环相同：实际热量高于目标才算超出。未记录不计入超标，也不算成没吃够。没有当天保存的目标时，按当前碳循环重算：训练日高碳，休息日低碳。</p>
         <div className="ct-metrics">
           <div className={`ct-metric ${ana.proteinDays > 0 && ana.proteinReached === ana.proteinDays ? "ct-hit" : "ct-need"}`} data-testid="protein-reach"><span>蛋白吃够</span><b>{ana.proteinReached}<small style={{ fontSize: 14, color: "#8e8e93" }}>{`/${ana.proteinDays} 天`}</small></b></div>
@@ -1993,12 +2008,18 @@ select.ct-mini{width:88px}
 .ct-act{flex:none;width:32px;height:32px;border-radius:16px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .ct-act.on{background:#92e82a;border-color:#92e82a;color:#0b0b0b}
 .ct-mixadd{display:flex;flex-wrap:wrap;gap:6px;padding-top:8px}
-.ct-wcard{display:flex;flex-direction:column;gap:8px}
+.ct-wcard{display:flex;flex-direction:column;gap:8px;touch-action:pan-y}
+.ct-wnav{display:grid;grid-template-columns:36px minmax(0,1fr) 36px;align-items:center;gap:4px}
+.ct-wnav button{width:36px;height:36px;border:none;border-radius:18px;background:rgba(255,255,255,.08);color:#fff;font-size:22px;line-height:1;cursor:pointer}
+.ct-wnav button:disabled{opacity:.28;cursor:default}
+.ct-wnav b{display:block;text-align:center;color:#fff;font-size:15px;font-weight:750;white-space:nowrap}
+.ct-wnav small{display:block;margin-top:1px;text-align:center;color:#8e8e93;font-size:11px;font-weight:650}
 .ct-wring{display:block;width:100%;height:auto}
 .ct-wrings{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
 .ct-wrings button{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0;padding:0;border:none;background:none;color:#8e8e93;cursor:pointer}
 .ct-wrings svg{display:block;width:100%;max-width:44px;height:auto}
 .ct-wrings span{font-size:10px;line-height:1.1;white-space:nowrap}
+.ct-wrings button.future{color:#636366}
 .ct-whint{margin:2px 0 0;color:#ff9f0a;font-size:13px;line-height:1.4}
 .ct-seg2{display:flex;gap:6px;margin:0 0 8px}
 .ct-seg2 button{height:28px;padding:0 12px;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:transparent;color:#d1d1d6;font-size:12px;font-weight:700;cursor:pointer}
