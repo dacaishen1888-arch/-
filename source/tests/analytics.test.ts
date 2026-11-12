@@ -366,7 +366,7 @@ describe("week balance", () => {
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v42", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v42"');
+  it("bumps the cache to ct-v43", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v43"');
   });
 });
