@@ -277,7 +277,7 @@ describe("carb-cycle analytics", () => {
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v36", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v36"');
+  it("bumps the cache to ct-v37", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v37"');
   });
 });

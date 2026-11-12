@@ -13,6 +13,15 @@ export type Macros = { k: number; p: number; c: number; f: number };
 
 export const MEALS = ["早餐", "训练后", "午餐", "晚餐", "加餐"] as const;
 
+export function suggestMeal(hour: number): (typeof MEALS)[number] {
+  const h = ((Math.floor(hour) % 24) + 24) % 24;
+  if (h >= 5 && h < 10) return "早餐";
+  if (h >= 10 && h < 12) return "训练后";
+  if (h >= 12 && h < 15) return "午餐";
+  if (h >= 15 && h < 18) return "加餐";
+  return "晚餐";
+}
+
 export function r0(x: number): number { return Math.round(x); }
 
 export function formatShanghai(d: Date): string {
