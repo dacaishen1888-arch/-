@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, proteinBand, r0, scaleEntryGrams, scaleEntryKcal, seenReminders, shanghaiClock, shanghaiToday, streakCount, suggestMeal, todayAnalysis, weekday, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, proteinBand, r0, scaleEntryGrams, scaleEntryKcal, seenReminders, shanghaiClock, shanghaiToday, streakCount, suggestMeal, todayAnalysis, weekBalance, weekday, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
@@ -1086,6 +1086,26 @@ function MealCapsules({ value, onChange, label }: { value: string; onChange: (m:
   return <div className="ct-mcaps" role="group" aria-label={label}>{MEALS.map((m: string) => <button type="button" key={m} className={m === value ? "on" : ""} aria-pressed={m === value} style={m === value ? { background: MEAL_C[m], borderColor: MEAL_C[m], color: "#0b0b0b" } : { color: MEAL_C[m], borderColor: `${MEAL_C[m]}88` }} onClick={() => onChange(m)}>{m}</button>)}</div>;
 }
 
+function gramDelta(n: number): string {
+  const v = r0(Math.abs(n));
+  if (v === 0) return "持平";
+  return n > 0 ? `多 ${v}g` : `少 ${v}g`;
+}
+
+function WeekPanel({ wb }: { wb: ReturnType<typeof weekBalance> }) {
+  const net = wb.kcalNet >= 0 ? `缺口 ${wb.kcalNet}` : `超出 ${-wb.kcalNet}`;
+  return <div data-testid="week-panel">
+    <p className="ct-note">滚动 7 天，含周末。蛋白和碳水按当天区间的最低值判断。未记录不计入汇总。</p>
+    <div className="ct-days">
+      {wb.days.map((d) => <div key={d.date} className="ct-day" data-testid={`week-${d.date}`}>
+        <div className="ct-day-top"><b>{`${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))} · ${d.train ? "训练" : "休息"}`}</b>{!d.logged && <span className="ct-st none">未记录</span>}</div>
+        {d.logged ? <p className="ct-note">{`蛋白 ${r0(d.p)}/${d.pMin}g ${d.proteinHit ? "已吃够" : "还差"} · 碳水${gramDelta(d.carbGap)} · 脂肪${gramDelta(d.fatGap)}`}</p> : <p className="ct-note">没有饮食记录。</p>}
+      </div>)}
+    </div>
+    <div className="ct-group" data-testid="week-sum"><b>{`一周热量 ${wb.kcalActual}/${wb.kcalTarget} · ${net} kcal`}</b><p className="ct-note">{wb.tradeoff}</p><p className="ct-note">{wb.conclusion}</p></div>
+  </div>;
+}
+
 function GroupAvg({ title, g }: { title: string; g: { days: number; k: number; p: number; c: number; f: number; targetK: number; targetP: number; targetPMax: number; targetC: number; targetCMax: number; targetF: number; adherence: number } }) {
   if (!g.days) return <p className="ct-note">{`没有已记录的${title}。`}</p>;
   return <div className="ct-group" data-testid={`avg-${title}`}><b>{`${title}均 · ${g.days} 天 · 热量 ${g.adherence}%`}</b><p className="ct-note">{`热量 ${g.k}/${g.targetK} kcal · 蛋白 ${g.p}/${proteinBand(g.targetP, g.targetPMax)} g · 碳水 ${g.c}/${proteinBand(g.targetC, g.targetCMax)} g · 脂肪 ${g.f}/${g.targetF} g`}</p></div>;
@@ -1146,6 +1166,7 @@ export default function App() {
   const [tab, setTab] = useState<string>("log");
   const [prevTab, setPrevTab] = useState<string>("log");
   const [sub, setSub] = useState<string>("ana");
+  const [weekOn, setWeekOn] = useState<boolean>(false);
   const [rtOpen, setRtOpen0] = useState<boolean>(() => { try { return sessionStorage.getItem("ct_rt_open") === "1"; } catch (e) { return false; } });
   const setRtOpen = (v: boolean) => { setRtOpen0(v); try { sessionStorage.setItem("ct_rt_open", v ? "1" : "0"); } catch (e) { /* ignore */ } };
   const [showAi, setShowAi] = useState<boolean>(false);
@@ -1630,6 +1651,8 @@ export default function App() {
       {tab === "trend" && sub === "ana" && (
       <Fragment><div className="ct-card" data-testid="ana-card" data-end={date} data-logged={loggedN} data-avgk={ana.avgKLogged} data-over={ana.overCount}>
         <div className="ct-chead"><h2 className="ct-ctitle">{`近7天 · ${ana.days[0] ? `${Number(ana.days[0].date.slice(5, 7))}月${Number(ana.days[0].date.slice(8))}日` : ""} 至 ${Number(date.slice(5, 7))}月${Number(date.slice(8))}日`}</h2></div>
+        <div className="ct-seg2" role="group" aria-label="分析范围"><button type="button" className={weekOn ? "" : "on"} aria-pressed={!weekOn} onClick={() => setWeekOn(false)}>每日</button><button type="button" className={weekOn ? "on" : ""} aria-pressed={weekOn} onClick={() => setWeekOn(true)}>一周</button></div>
+        {weekOn ? <WeekPanel wb={weekBalance(ana)} /> : <Fragment>
         <p className="ct-note">每一天只和自己的目标比，规则与今日圆环相同：实际热量高于目标才算超出。未记录不计入超标，也不算成没吃够。没有当天保存的目标时，按当前碳循环重算：训练日高碳，休息日低碳。</p>
         <div className="ct-metrics">
           <div className={`ct-metric ${ana.proteinDays > 0 && ana.proteinReached === ana.proteinDays ? "ct-hit" : "ct-need"}`} data-testid="protein-reach"><span>蛋白吃够</span><b>{ana.proteinReached}<small style={{ fontSize: 14, color: "#8e8e93" }}>{`/${ana.proteinDays} 天`}</small></b></div>
@@ -1657,6 +1680,7 @@ export default function App() {
           })}
         </div>
         <p className="ct-note">{loggedN ? `未记录 ${ana.unlogged} 天，不计入吃够天数和日均。` : "这 7 天还没有饮食记录。"}</p>
+        </Fragment>}
       </div></Fragment>
       )}
 
@@ -1919,6 +1943,9 @@ select.ct-mini{width:88px}
 .ct-qchips{display:flex;flex-wrap:wrap;gap:4px}
 .ct-qchips button{min-width:32px;height:28px;padding:0 6px;border-radius:14px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#d1d1d6;font-size:12px}
 .ct-qchips button.on{background:#ff9f0a;color:#1a1206;border-color:#ff9f0a;font-weight:700}
+.ct-seg2{display:flex;gap:6px;margin:0 0 8px}
+.ct-seg2 button{height:28px;padding:0 12px;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:transparent;color:#d1d1d6;font-size:12px;font-weight:700;cursor:pointer}
+.ct-seg2 button.on{background:#fff;color:#0b0b0b}
 .ct-mcaps{display:flex;flex-wrap:wrap;gap:4px}
 .ct-mcaps button{height:28px;padding:0 8px;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:transparent;color:#d1d1d6;font-size:12px;font-weight:650;cursor:pointer}
 .ct-mcaps button.on{font-weight:800}

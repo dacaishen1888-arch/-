@@ -496,6 +496,76 @@ export function analyzeWindow(log: Record<string, readonly Entry[] | undefined>,
   };
 }
 
+export type WeekDayBalance = {
+  date: string;
+  train: boolean;
+  logged: boolean;
+  p: number;
+  c: number;
+  f: number;
+  k: number;
+  pMin: number;
+  cMin: number;
+  targetF: number;
+  targetK: number;
+  carbGap: number;
+  fatGap: number;
+  proteinHit: boolean;
+  carbHit: boolean;
+};
+
+export type WeekBalance = {
+  days: WeekDayBalance[];
+  logged: number;
+  kcalActual: number;
+  kcalTarget: number;
+  kcalNet: number;
+  fatOverG: number;
+  fatOverKcal: number;
+  carbShortG: number;
+  carbShortKcal: number;
+  offset: "抵消" | "脂肪更多" | "碳水缺口更大" | "无明显对冲";
+  tradeoff: string;
+  conclusion: string;
+};
+
+export function weekBalance(w: WindowStats): WeekBalance {
+  const days: WeekDayBalance[] = w.days.map((d) => {
+    const logged = d.entries > 0;
+    return {
+      date: d.date, train: d.train, logged, p: d.p, c: d.c, f: d.f, k: d.k,
+      pMin: d.targetPMin, cMin: d.targetCMin, targetF: d.targetF, targetK: d.targetK,
+      carbGap: logged ? d.c - d.targetCMin : 0,
+      fatGap: logged ? d.f - d.targetF : 0,
+      proteinHit: logged && d.p + 1e-6 >= d.targetPMin,
+      carbHit: logged && d.c + 1e-6 >= d.targetCMin,
+    };
+  });
+  const loggedDays = days.filter((d) => d.logged);
+  const kcalActual = r0(loggedDays.reduce((a, d) => a + d.k, 0));
+  const kcalTarget = r0(loggedDays.reduce((a, d) => a + d.targetK, 0));
+  const kcalNet = kcalTarget - kcalActual;
+  const fatOverG = r0(loggedDays.reduce((a, d) => a + Math.max(0, d.fatGap), 0));
+  const carbShortG = r0(loggedDays.reduce((a, d) => a + Math.max(0, -d.carbGap), 0));
+  const fatOverKcal = fatOverG * 9;
+  const carbShortKcal = carbShortG * 4;
+  let offset: WeekBalance["offset"] = "无明显对冲";
+  if (fatOverG >= 5 || carbShortG >= 10) {
+    const diff = fatOverKcal - carbShortKcal;
+    offset = Math.abs(diff) <= 80 ? "抵消" : diff > 0 ? "脂肪更多" : "碳水缺口更大";
+  }
+  const tail = offset === "抵消" ? "一周热量基本持平" : offset === "脂肪更多" ? "脂肪多出的热量更多" : offset === "碳水缺口更大" ? "碳水少掉的热量更多" : "没有明显的脂肪和碳水对冲";
+  const tradeoff = loggedDays.length ? `脂肪多 ${fatOverG}g≈${fatOverKcal}kcal，碳水少 ${carbShortG}g≈${carbShortKcal}kcal，${tail}` : "没有已记录的日子。";
+  const trainCarbShort = loggedDays.some((d) => d.train && d.carbGap < -1);
+  let conclusion = "按最低值看，这一周还算稳。";
+  if (!loggedDays.length) conclusion = "这 7 天还没有饮食记录。";
+  else if (trainCarbShort && fatOverG >= 10) conclusion = "脂肪偏多挤掉了训练日碳水，建议训练日先保证碳水下限。";
+  else if (kcalNet < -150) conclusion = "一周热量超了，周末也算在内，先把脂肪收回来。";
+  else if (offset === "抵消") conclusion = "脂肪多出来的热量和碳水少掉的大致抵消。";
+  else if (carbShortG >= 40) conclusion = "碳水低于下限的日子偏多，训练日先补到最低。";
+  return { days, logged: loggedDays.length, kcalActual, kcalTarget, kcalNet, fatOverG, fatOverKcal, carbShortG, carbShortKcal, offset, tradeoff, conclusion };
+}
+
 export function streakCount(log: Record<string, readonly unknown[] | undefined>, today: string): number {
   let d = today;
   if (!(log[d]?.length)) d = addDays(d, -1);
