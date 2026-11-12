@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
-import { addDays, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weeklyDeficit, migrateProteinTargets, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
+import { addDays, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weeklyDeficit, migrateProteinTargets, weekBalance, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
 
 const profile: Profile = { h: "170", w: "82", age: "34", bf: "", act: "1.6", def: "18" };
 const e = (id: number, k: number, p: number, c = 0, f = 0, grams = 100): Entry => ({ id, meal: "午餐", name: "食物", grams, k, p, c, f });
@@ -282,8 +282,49 @@ describe("carb-cycle analytics", () => {
   });
 });
 
+describe("week balance", () => {
+  const pr = PROFILE_DEFAULT;
+  const train = calcTargets(pr, true);
+  const rest = calcTargets(pr, false);
+  const food = (id: number, k: number, p: number, c: number, f: number): Entry => ({ id, meal: "午餐", name: "a", grams: 100, k, p, c, f });
+  it("sums only logged days and compares fat surplus with carb shortfall", () => {
+    const w = analyzeWindow({
+      "2026-11-06": [food(1, train.kcal - 100, train.pMin, train.cMin - 40, train.f + 10)],
+      "2026-11-07": [food(2, rest.kcal + 50, rest.pMin, rest.cMin - 20, rest.f + 8)],
+    }, "2026-11-08", pr);
+    const b = weekBalance(w);
+    expect(b.logged).toBe(2);
+    expect(b.days.filter((d) => !d.logged)).toHaveLength(5);
+    expect(b.days.find((d) => d.date === "2026-11-08")?.logged).toBe(false);
+    expect(b.carbShortG).toBe(60);
+    expect(b.carbShortKcal).toBe(240);
+    expect(b.fatOverG).toBe(18);
+    expect(b.fatOverKcal).toBe(162);
+    expect(b.kcalActual).toBe(train.kcal - 100 + rest.kcal + 50);
+    expect(b.kcalTarget).toBe(train.kcal + rest.kcal);
+    expect(b.kcalNet).toBe(50);
+    expect(b.offset).toBe("抵消");
+    expect(b.tradeoff).toContain("一周热量基本持平");
+    expect(b.conclusion).toContain("训练日先保证碳水下限");
+    expect(b.days.find((d) => d.date === "2026-11-06")?.carbHit).toBe(false);
+    expect(b.days.find((d) => d.date === "2026-11-06")?.proteinHit).toBe(true);
+  });
+  it("ignores unlogged days and stays calm when macros are inside the band", () => {
+    const w = analyzeWindow({
+      "2026-11-08": [food(1, rest.kcal, rest.pMin, rest.cMin + 5, rest.f - 4)],
+    }, "2026-11-08", pr);
+    const b = weekBalance(w);
+    expect(b.logged).toBe(1);
+    expect(b.fatOverG).toBe(0);
+    expect(b.carbShortG).toBe(0);
+    expect(b.offset).toBe("无明显对冲");
+    expect(b.conclusion).toContain("还算稳");
+    expect(b.kcalNet).toBe(0);
+  });
+});
+
 describe("service worker", () => {
-  it("bumps the cache to ct-v39", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v39"');
+  it("bumps the cache to ct-v40", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v40"');
   });
 });

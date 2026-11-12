@@ -145,13 +145,21 @@ export function ColumnSeries({ labels, series, reference, references }: { labels
   );
 }
 export function WeekBars({ days }: { days: { label: string; sub: string; kcal: number | null; target: number; status: "未记录" | "未超标" | "超出" }[] }) {
-  const W = 340, H = 210, pl = 42, pr = 8, pt = 22, pb = 36;
-  const max = Math.max(1, ...days.map((d) => Math.max(d.target || 0, d.kcal || 0))) * 1.18;
+  const W = 340, H = 210, pl = 42, pr = 62, pt = 16, pb = 36;
+  const max = Math.max(1, ...days.map((d) => Math.max(d.target || 0, d.kcal || 0))) * 1.12;
   const y = (v: number) => pt + (H - pb - pt) * (1 - v / max);
   const slot = (W - pl - pr) / Math.max(1, days.length);
   const ticks = [0, max / 2, max];
   const fill = (s: string) => s === "超出" ? "#ff453a" : "#ff9f0a";
   const cxOf = (i: number) => pl + i * slot + slot / 2;
+  const goals = [...new Set(days.map((d) => Math.round(d.target)))].sort((a, b) => y(a) - y(b));
+  let prevLabel = -999;
+  const goalLabels = goals.map((v) => {
+    let yy = y(v);
+    if (yy < prevLabel + 16) yy = prevLabel + 16;
+    prevLabel = yy;
+    return { v, yy };
+  });
   return (
     <div style={{ ...card, background: "#141416", padding: 12 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, color: T.text.secondary, marginBottom: 6 }}>
@@ -162,7 +170,7 @@ export function WeekBars({ days }: { days: { label: string; sub: string; kcal: n
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="近7天每日热量。白线是当天热量目标，训练日和休息日各自不同">
         {ticks.map((v, i) => <g key={i}><line x1={pl} x2={W - pr} y1={y(v)} y2={y(v)} stroke="#2c2c2e" /><text x={pl - 4} y={y(v) + 3} fontSize="10" textAnchor="end" fill="#8e8e93">{Math.round(v)}</text></g>)}
         {days.length > 0 && <path d={days.map((d, i) => { const cx = cxOf(i); const yy = y(d.target); const half = slot * 0.42; if (i === 0) return `M ${cx - half} ${yy} H ${cx + half}`; const prev = y(days[i - 1].target); const mid = pl + (i - 0.5) * slot + slot / 2; return `M ${mid} ${prev} V ${yy} H ${cx + half}`; }).join(" ")} fill="none" stroke="#fff" strokeWidth="1.6" strokeLinejoin="round" />}
-        {days.map((d, i) => i > 0 && days[i - 1].target === d.target ? null : <text key={`goal-${i}`} x={cxOf(i)} y={Math.max(11, y(d.target) - 5)} fontSize="8" textAnchor="start" fill="#fff">{`目标 ${Math.round(d.target)}`}</text>)}
+        {goalLabels.map(({ v, yy }) => <g key={`goal-${v}`}><rect x={W - pr + 4} y={yy - 7} width={pr - 8} height={14} rx="3" fill="rgba(10,10,12,0.88)" /><text x={W - 6} y={yy + 3} fontSize="9" textAnchor="end" fill="#fff">{`目标 ${v}`}</text></g>)}
         {days.map((d, i) => {
           const x = pl + i * slot + slot * 0.18;
           const bw = slot * 0.64;
@@ -172,7 +180,7 @@ export function WeekBars({ days }: { days: { label: string; sub: string; kcal: n
           return <g key={i}><rect x={x} y={y(d.kcal)} width={bw} height={Math.max(0, y(0) - y(d.kcal))} rx="4" fill={fill(d.status)} /><text x={x + bw / 2} y={Math.max(14, y(Math.max(d.kcal, d.target)) - 4)} fontSize="10" textAnchor="middle" fill="#fff">{d.kcal}</text><text x={x + bw / 2} y={H - 18} fontSize="10" textAnchor="middle" fill="#d1d1d6">{d.label}</text><text x={x + bw / 2} y={H - 6} fontSize="9" textAnchor="middle" fill="#8e8e93">{d.sub}</text></g>;
         })}
       </svg>
-      <p style={{ margin: "6px 0 0", fontSize: 11, lineHeight: 1.4, color: "#8e8e93" }}>白线是当天热量目标，数字标在每一段旁边。训练日和休息日不一样，所以线会阶梯变化。蛋白和碳水是区间，不画在这张热量图上。</p>
+      <p style={{ margin: "6px 0 0", fontSize: 11, lineHeight: 1.4, color: "#8e8e93" }}>右侧标签是当天热量目标，每种只标一次。训练日和休息日不同，白线会阶梯变化。</p>
     </div>
   );
 }
