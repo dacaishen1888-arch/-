@@ -305,7 +305,11 @@ describe("week balance", () => {
     expect(b.kcalNet).toBe(50);
     expect(b.offset).toBe("抵消");
     expect(b.tradeoff).toContain("一周热量基本持平");
-    expect(b.conclusion).toContain("训练日先保证碳水下限");
+    expect(b.badge).toBe("平衡");
+    expect(b.bar).toBe("ok");
+    expect(b.reason).toContain("热量缺口 50 kcal，有利减脂");
+    expect(b.reason).not.toContain("偏低");
+    expect(b.warn).toContain("训练日碳水不足");
     expect(b.days.find((d) => d.date === "2026-11-06")?.carbHit).toBe(false);
     expect(b.days.find((d) => d.date === "2026-11-06")?.proteinHit).toBe(true);
   });
@@ -318,13 +322,38 @@ describe("week balance", () => {
     expect(b.fatOverG).toBe(0);
     expect(b.carbShortG).toBe(0);
     expect(b.offset).toBe("无明显对冲");
-    expect(b.conclusion).toContain("还算稳");
+    expect(b.badge).toBe("平衡");
+    expect(b.bar).toBe("ok");
+    expect(b.reason).toContain("持平");
+    expect(b.warn).toBe("");
     expect(b.kcalNet).toBe(0);
+  });
+  it("keeps a calorie deficit green and flags protein or displaced carbs in orange", () => {
+    const over = weekBalance(analyzeWindow({
+      "2026-11-06": [food(1, Math.round(train.kcal * 1.2), train.pMin, train.cMin, train.f)],
+    }, "2026-11-06", pr));
+    expect(over.badge).toBe("偏高");
+    expect(over.bar).toBe("high");
+    expect(over.reason).toContain("超出");
+    const lean = weekBalance(analyzeWindow({
+      "2026-11-06": [food(2, train.kcal - 400, train.pMin, train.cMin, train.f)],
+    }, "2026-11-06", pr));
+    expect(lean.badge).toBe("平衡");
+    expect(lean.bar).toBe("ok");
+    expect(lean.reason).toContain("有利减脂");
+    expect(lean.reason).not.toContain("偏低");
+    const lowP = weekBalance(analyzeWindow({
+      "2026-11-06": [food(3, train.kcal - 200, train.pMin - 40, train.cMin, train.f)],
+    }, "2026-11-06", pr));
+    expect(lowP.badge).toBe("注意");
+    expect(lowP.bar).toBe("ok");
+    expect(lowP.warn).toContain("蛋白达标");
+    expect(lowP.reason).not.toContain("偏低");
   });
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v40", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v40"');
+  it("bumps the cache to ct-v41", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v41"');
   });
 });

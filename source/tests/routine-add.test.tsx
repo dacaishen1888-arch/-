@@ -20,9 +20,9 @@ describe("routine meal capsules add immediately", () => {
     render(<App />);
     expect(screen.queryByRole("button", { name: "+早餐" })).toBeNull();
     expect(screen.queryByRole("button", { name: "+午餐" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /我的常规/ }));
+    fireEvent.click(screen.getByRole("button", { name: /补剂·常规/ }));
     expect(screen.queryByRole("button", { name: "训练餐 减少" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "训练餐 数量" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开 训练餐" }));
     fireEvent.click(screen.getByRole("button", { name: "训练餐 2份" }));
     const group = screen.getByRole("group", { name: "训练餐 添加到" });
     fireEvent.click(within(group).getByRole("button", { name: "午餐" }));
@@ -40,10 +40,11 @@ describe("routine meal capsules add immediately", () => {
 
   it("keeps supplement quantity controls folded until tapped", () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /补剂·常规/ }));
     expect(screen.queryByRole("button", { name: "乳清蛋白 减少" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "乳清蛋白 数量" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开 乳清蛋白" }));
     expect(screen.getByRole("button", { name: "乳清蛋白 减少" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "乳清蛋白 数量" }));
+    fireEvent.click(screen.getByRole("button", { name: "收起 乳清蛋白" }));
     expect(screen.queryByRole("button", { name: "乳清蛋白 减少" })).toBeNull();
   });
 });

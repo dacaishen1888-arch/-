@@ -1093,16 +1093,30 @@ function gramDelta(n: number): string {
 }
 
 function WeekPanel({ wb }: { wb: ReturnType<typeof weekBalance> }) {
-  const net = wb.kcalNet >= 0 ? `缺口 ${wb.kcalNet}` : `超出 ${-wb.kcalNet}`;
+  const W = 340, H = 108, mid = 46, pad = 4;
+  const slot = (W - pad * 2) / 7;
+  const maxG = Math.max(24, ...wb.days.flatMap((d) => [Math.abs(d.carbGap), Math.abs(d.fatGap)]));
+  const gy = (g: number) => mid - (g / maxG) * 32;
+  const maxK = Math.max(wb.kcalActual, wb.kcalTarget, 1);
+  const fatW = Math.max(wb.fatOverKcal, wb.carbShortKcal, 1);
   return <div data-testid="week-panel">
-    <p className="ct-note">滚动 7 天，含周末。蛋白和碳水按当天区间的最低值判断。未记录不计入汇总。</p>
-    <div className="ct-days">
-      {wb.days.map((d) => <div key={d.date} className="ct-day" data-testid={`week-${d.date}`}>
-        <div className="ct-day-top"><b>{`${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))} · ${d.train ? "训练" : "休息"}`}</b>{!d.logged && <span className="ct-st none">未记录</span>}</div>
-        {d.logged ? <p className="ct-note">{`蛋白 ${r0(d.p)}/${d.pMin}g ${d.proteinHit ? "已吃够" : "还差"} · 碳水${gramDelta(d.carbGap)} · 脂肪${gramDelta(d.fatGap)}`}</p> : <p className="ct-note">没有饮食记录。</p>}
-      </div>)}
-    </div>
-    <div className="ct-group" data-testid="week-sum"><b>{`一周热量 ${wb.kcalActual}/${wb.kcalTarget} · ${net} kcal`}</b><p className="ct-note">{wb.tradeoff}</p><p className="ct-note">{wb.conclusion}</p></div>
+    <div className="ct-bal" data-testid="week-badge"><b className={wb.badge === "平衡" ? "ok" : wb.badge === "偏高" ? "high" : "warn"}>{wb.badge}</b><span>{wb.reason}</span></div>
+    {wb.warn ? <p className="ct-warn" data-testid="week-warn">{wb.warn}</p> : null}
+    <div className="ct-dots" aria-label="蛋白达标">{wb.days.map((d) => <i key={d.date} className={!d.logged ? "none" : d.proteinHit ? "ok" : "miss"} title={d.date} />)}</div>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="每日碳水和脂肪差额，向上为多吃，向下为少吃">
+      <line x1={pad} x2={W - pad} y1={mid} y2={mid} stroke="#636366" strokeWidth="1" />
+      {wb.days.map((d, i) => {
+        const x = pad + i * slot + slot / 2;
+        if (!d.logged) return <g key={d.date}><rect x={x - 7} y={mid - 3} width={14} height={6} rx="2" fill="#3a3a3c" /><text x={x} y={H - 2} fontSize="8" textAnchor="middle" fill="#636366">{Number(d.date.slice(8))}</text></g>;
+        const bar = (gap: number, dx: number, color: string) => { const y1 = gy(0); const y2 = gy(gap); const top = Math.min(y1, y2); return <rect x={x + dx} y={top} width="5" height={Math.max(1, Math.abs(y2 - y1))} rx="1" fill={color} />; };
+        return <g key={d.date}>{bar(d.carbGap, -6, "#64d2ff")}{bar(d.fatGap, 1, "#ffd60a")}<text x={x} y={H - 2} fontSize="8" textAnchor="middle" fill="#8e8e93">{Number(d.date.slice(8))}</text></g>;
+      })}
+    </svg>
+    <p className="ct-note">蓝柱碳水、黄柱脂肪，中线为 0。向上多吃，向下少吃。灰块是未记录。</p>
+    <div className="ct-kbar" data-testid="week-kcal"><div className={wb.bar === "ok" ? "ok" : "high"} style={{ width: `${Math.min(100, wb.kcalActual / maxK * 100)}%` }} /></div>
+    <p className="ct-note">{`${wb.kcalActual}/${wb.kcalTarget} · ${wb.kcalNet > 0 ? `缺口 ${wb.kcalNet}` : wb.kcalNet < 0 ? `超出 ${-wb.kcalNet}` : "持平"} kcal`}</p>
+    <div className="ct-cmp"><span>碳水少</span><div><i className="c" style={{ width: `${wb.carbShortKcal / fatW * 100}%` }} /></div><b>{`−${wb.carbShortKcal}`}</b></div>
+    <div className="ct-cmp"><span>脂肪多</span><div><i className="f" style={{ width: `${wb.fatOverKcal / fatW * 100}%` }} /></div><b>{`+${wb.fatOverKcal}`}</b></div>
   </div>;
 }
 
@@ -1190,6 +1204,9 @@ export default function App() {
   const [waterBtns, setWaterBtns] = useState<number[]>(() => load<number[]>("fl_water_btns", [250, 500, -250]));
   useEffect(() => save("fl_water_btns", waterBtns), [waterBtns]);
   const [spEdit, setSpEdit] = useState<boolean>(false);
+  const [mixOpen, setMixOpen] = useState<boolean>(false);
+  const [rowOpen, setRowOpen] = useState<string>("");
+  const holdRow = useRef<number>(0);
   useEffect(() => save("fl_tpl", tpls), [tpls]);
   const [tplDef, setTplDef] = useState<{ train: string; rest: string }>(() => load<{ train: string; rest: string }>("fl_tpl_def", { train: "", rest: "" }));
   useEffect(() => save("fl_tpl_def", tplDef), [tplDef]);
@@ -1419,7 +1436,7 @@ export default function App() {
   const wl = (x: number) => x > 0 ? `+${x}ml` : `−${Math.abs(x)}ml`;
   const pen = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>;
   const chk = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
-  const spTog = <button type="button" className={`ct-ib${spEdit ? " on" : ""}`} aria-label={spEdit ? "完成编辑" : "编辑饮水和补剂"} aria-pressed={spEdit} onClick={() => setSpEdit(!spEdit)}>{spEdit ? chk : pen}</button>;
+  const spTog = <button type="button" className={`ct-ib${spEdit ? " on" : ""}`} aria-label={spEdit ? "完成编辑" : "编辑补剂和常规"} aria-pressed={spEdit} onClick={() => { setSpEdit(!spEdit); if (!spEdit) setMixOpen(true); }}>{spEdit ? chk : pen}</button>;
   const wPct = Math.round(wml / (wtL * 10));
   const suppCard = <div className="ct-ws">
     <div className="ct-sub">饮水</div>
@@ -1429,11 +1446,6 @@ export default function App() {
     <div className={`ct-g3${spEdit ? " ct-edg" : ""}`}>
       {waterBtns.map((x: number, i: number) => spEdit ? <div key={i} data-wb={x} className="ct-pill ct-ed"><button type="button" className="ct-edl" aria-label={`编辑饮水 ${x}`} onClick={() => askWater(i)}><span>{wl(x)}</span></button><button type="button" className="ct-del" aria-label={`删除饮水 ${x}`} onClick={() => delWater(i)}>🗑</button></div> : <button type="button" key={i} className="ct-pill" onClick={() => addWater(x)}><span>{wl(x)}</span></button>)}
       {spEdit && <button type="button" className="ct-pill ct-add" onClick={() => askWater()}><span>+ 添加</span></button>}
-    </div>
-    <div className="ct-sub" style={{ marginTop: 4 }}>补剂</div>
-    <div className={spEdit ? "ct-g3 ct-edg" : "ct-supp"}>
-      {spEdit ? suppList.map((it: SuppItem) => <div key={it.n} className="ct-pill ct-ed"><button type="button" className="ct-edl" aria-label={`编辑补剂 ${it.n}`} onClick={() => askSupp(it)}><span>{it.n}</span></button><button type="button" className="ct-del" aria-label={`删除补剂 ${it.n}`} onClick={() => delSupp(it)}>🗑</button></div>) : suppList.map((it: SuppItem) => { const on = sp1.includes(it.n); const logged = entries.find((e: Entry) => isSuppLog(e, it)); const q = on && logged?.qty ? logged.qty : (pickQty["s:" + it.n] ?? 1); return <div key={it.n} className="ct-srow" data-testid={`supp-${it.n}`}><button type="button" className={`ct-pill ct-chip${on ? " on" : ""}`} aria-pressed={on} onClick={() => togSupp(it.n, q)}>{on && chk}<span>{it.n}</span></button><QtyFold label={it.n} value={q} onChange={(n: number) => on ? setSuppAmount(it, n) : setPickQty((M) => ({ ...M, ["s:" + it.n]: n }))} /></div>; })}
-      {spEdit && <button type="button" className="ct-pill ct-add" onClick={() => askSupp()}><span>+ 补剂</span></button>}
     </div>
   </div>;
   const dateBar = (
@@ -1581,28 +1593,21 @@ export default function App() {
         <div className="ct-card">
           <div className="ct-chead"><h2 className="ct-ctitle">饮水 · 补剂 · 常规</h2>{spTog}</div>
           {suppCard}
-        <button type="button" className="ct-rthd" aria-expanded={rtOpen} onClick={() => setRtOpen(!rtOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", minHeight: 44, marginTop: 12, padding: "10px 0 0", background: "none", border: "none", borderTop: "1px solid rgba(255,255,255,.08)", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left" }}><span>{`我的常规 (${Object.keys(tpls).length})`}</span><span className="ct-chev" style={{ transform: rtOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }}>›</span></button>
-        {rtOpen && <div className="ct-rtbody" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-          {routine.length > 0 && <div className="ct-quick" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div className="ct-srow"><span className="ct-pill"><span>{rkey}</span></span><QtyFold label={rkey || "常规"} value={pickQty["t:" + rkey] ?? 1} onChange={(n: number) => setPickQty((M) => ({ ...M, ["t:" + rkey]: n }))} /></div><MealCapsules label={`${rkey} 添加到`} value={addMeal} onChange={(m: string) => placeRoutine(rkey, routine, pickQty["t:" + rkey] ?? 1, m)} /><Btn label={`⚡ 添加到${addMeal}「${rkey}」×${formatQty(pickQty["t:" + rkey] ?? 1)}`} variant="primary" full onClick={() => placeRoutine(rkey, routine, pickQty["t:" + rkey] ?? 1, addMeal)} />
-          </div>}
-          <div id="rt-sec" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {Object.keys(tpls).length > 0 && <Btn label={rtEdit ? "✓ 完成" : "✎ 编辑"} variant={rtEdit ? "primary" : "quiet"} onClick={() => { setRtEdit(!rtEdit); setEdName(""); }} />}
-            <Btn label="+ 新建常规" variant="primary" onClick={() => askNew([])} />
-            <Btn label="把今天存为常规" onClick={() => { if (!entries.length) { flash("今天还没有记录"); return; } askNew(entries); }} />
-          </div>
-          {Object.keys(tpls).length === 0 && <Text>还没有常规。点“+ 新建常规”起个名字，再搜索食物加入；之后一键添加到今天。</Text>}
-          {Object.keys(tpls).map((n: string) => { const es = Array.isArray(tpls[n]) ? tpls[n] : []; const qn = pickQty["t:" + n] ?? 1; const addAll = () => placeRoutine(n, es, qn, addMeal);
-            return <div key={n} data-tpl={n} className="ct-srow" style={{ border: n === edName ? `1px solid ${th.text.primary}` : undefined, borderRadius: 12, padding: n === edName ? 8 : undefined }}>
-            <button type="button" className="ct-pill" onClick={rtEdit ? undefined : addAll}><span>{`${n}${n === tplDef.train ? " 🏋" : ""}${n === tplDef.rest ? " 🛋" : ""}`}</span></button>
-            {!rtEdit && <QtyFold label={n} value={qn} onChange={(v: number) => setPickQty((M) => ({ ...M, ["t:" + n]: v }))} />}
-            {rtEdit && <button type="button" className="ct-tb" aria-label={`编辑 ${n}`} onClick={() => { if (n === edName) setEdName(""); else { setEdName(n); setEdNew(n); } }}>✎</button>}
-            {rtEdit && <button type="button" className="ct-tb ct-tb-del" aria-label={`删除 ${n}`} onClick={() => delTpl(n)}>🗑</button>}
-            {!rtEdit && <span className="ct-sub" style={{ flex: "1 1 100%" }}>{`${es.length}项 · ${r0(tk(es) * qn)}kcal · 点餐次即添加`}</span>}
-            {!rtEdit && <MealCapsules label={`${n} 添加到`} value={addMeal} onChange={(m: string) => placeRoutine(n, es, qn, m)} />}
-            {rtEdit && n === edName && tplEditor}
-          </div>; })}
-        </div>}
+          {(() => { const names = Object.keys(tpls); const routineDone = names.filter((n: string) => { const es = Array.isArray(tpls[n]) ? tpls[n] : []; return es.length > 0 && es.every((e: Entry) => { const base = e.name.replace(/\s*×[\d.]+$/, ""); return entries.some((x: Entry) => x.name === e.name || x.name.startsWith(base)); }); }).length; const done = suppList.filter((it: SuppItem) => sp1.includes(it.n)).length + routineDone; const total = suppList.length + names.length; const arm = (id: string) => { window.clearTimeout(holdRow.current); holdRow.current = window.setTimeout(() => setRowOpen(id), 400); }; const disarm = () => window.clearTimeout(holdRow.current); return <div>
+            <button type="button" className="ct-rthd" aria-expanded={mixOpen || spEdit} onClick={() => setMixOpen(!mixOpen)}><span>{`补剂·常规 ${done}/${total}`}</span><span className="ct-chev" style={{ transform: mixOpen || spEdit ? "rotate(90deg)" : "none" }}>›</span></button>
+            {(mixOpen || spEdit) && <div className="ct-mix" data-testid="mix-list">
+              {suppList.map((it: SuppItem) => { const on = sp1.includes(it.n); const logged = entries.find((e: Entry) => isSuppLog(e, it)); const q = on && logged?.qty ? logged.qty : (pickQty["s:" + it.n] ?? 1); const id = "s:" + it.n; const open = rowOpen === id; return <div key={id} data-testid={`supp-${it.n}`} onPointerDown={(ev) => { if ((ev.target as HTMLElement).closest("button")) return; arm(id); }} onPointerUp={disarm} onPointerCancel={disarm} onContextMenu={(ev) => ev.preventDefault()}>
+                <div className="ct-mixrow"><span>{it.n}</span><b>{formatQty(q)}</b>{spEdit ? <Fragment><button type="button" className="ct-act" aria-label={`编辑 ${it.n}`} onClick={() => askSupp(it)}>{pen}</button><button type="button" className="ct-act" aria-label={`删除 ${it.n}`} onClick={() => delSupp(it)}>🗑</button></Fragment> : <button type="button" className={`ct-act${on ? " on" : ""}`} aria-pressed={on} aria-label={on ? `取消 ${it.n}` : `记录 ${it.n}`} onClick={() => togSupp(it.n, q)}>{on ? chk : "+"}</button>}<button type="button" className="ct-act" aria-expanded={open} aria-label={open ? `收起 ${it.n}` : `展开 ${it.n}`} onClick={() => setRowOpen(open ? "" : id)}>›</button></div>
+                {open && <QtyPicker label={it.n} value={q} onChange={(n: number) => { if (on) setSuppAmount(it, n); else setPickQty((M) => ({ ...M, [id]: n })); }} />}
+              </div>; })}
+              {names.map((n: string) => { const es = Array.isArray(tpls[n]) ? tpls[n] : []; const qn = pickQty["t:" + n] ?? 1; const id = "t:" + n; const open = rowOpen === id; return <div key={id} data-tpl={n} onPointerDown={(ev) => { if ((ev.target as HTMLElement).closest("button")) return; arm(id); }} onPointerUp={disarm} onPointerCancel={disarm} onContextMenu={(ev) => ev.preventDefault()}>
+                <div className="ct-mixrow"><span>{`${n}${n === tplDef.train ? " 🏋" : ""}${n === tplDef.rest ? " 🛋" : ""}`}</span><b>{formatQty(qn)}</b>{spEdit ? <Fragment><button type="button" className="ct-act" aria-label={`编辑 ${n}`} onClick={() => { setRtEdit(true); setEdName(n); setEdNew(n); }}>{pen}</button><button type="button" className="ct-act" aria-label={`删除 ${n}`} onClick={() => delTpl(n)}>🗑</button></Fragment> : <button type="button" className="ct-act" aria-label={`添加 ${n}`} onClick={() => placeRoutine(n, es, qn, addMeal)}>+</button>}<button type="button" className="ct-act" aria-expanded={open} aria-label={open ? `收起 ${n}` : `展开 ${n}`} onClick={() => setRowOpen(open ? "" : id)}>›</button></div>
+                {open && <Fragment><QtyPicker label={n} value={qn} onChange={(v: number) => setPickQty((M) => ({ ...M, [id]: v }))} /><MealCapsules label={`${n} 添加到`} value={addMeal} onChange={(m: string) => { placeRoutine(n, es, qn, m); setRowOpen(""); }} /></Fragment>}
+                {spEdit && edName === n && tplEditor}
+              </div>; })}
+              {spEdit && <div className="ct-mixadd"><button type="button" className="ct-pill ct-add" onClick={() => askSupp()}><span>+ 补剂</span></button><button type="button" className="ct-pill ct-add" onClick={() => askNew([])}><span>+ 常规</span></button><button type="button" className="ct-pill ct-add" onClick={() => { if (!entries.length) { flash("今天还没有记录"); return; } askNew(entries); }}><span>把今天存为常规</span></button></div>}
+            </div>}
+          </div>; })()}
         </div>
       )}
 
@@ -1665,7 +1670,7 @@ export default function App() {
         <GroupAvg title="休息日" g={ana.restAvg} />
         <WeekBars days={ana.days.map((d) => ({ label: `${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))}`, sub: d.train ? "训练" : "休息", kcal: d.status === "未记录" ? null : d.shownK, target: d.targetK, status: d.status }))} />
         <div className="ct-days">
-          {ana.days.map((d) => {
+          {[...ana.days].reverse().map((d) => {
             const wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][weekday(d.date)];
             const cls = d.status === "超出" ? "over" : d.status === "未超标" ? "ok" : "none";
             return <div key={d.date} className={`ct-day${d.date === date ? " on" : ""}`} data-testid={`day-${d.date}`} data-status={d.status}>
@@ -1943,6 +1948,35 @@ select.ct-mini{width:88px}
 .ct-qchips{display:flex;flex-wrap:wrap;gap:4px}
 .ct-qchips button{min-width:32px;height:28px;padding:0 6px;border-radius:14px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#d1d1d6;font-size:12px}
 .ct-qchips button.on{background:#ff9f0a;color:#1a1206;border-color:#ff9f0a;font-weight:700}
+.ct-rthd{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:36px;margin-top:8px;padding:6px 0 0;background:none;border:none;border-top:1px solid rgba(255,255,255,.08);color:#fff;font-size:14px;font-weight:700;cursor:pointer;text-align:left}
+.ct-mixrow{display:flex;align-items:center;gap:8px;min-height:36px;padding:2px 0;border-top:1px solid rgba(255,255,255,.06)}
+.ct-mixrow>span{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:14px;font-weight:650}
+.ct-mixrow>b{flex:none;min-width:28px;text-align:center;color:#d1d1d6;font-variant-numeric:tabular-nums}
+.ct-act{flex:none;width:32px;height:32px;border-radius:16px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.ct-act.on{background:#92e82a;border-color:#92e82a;color:#0b0b0b}
+.ct-mixadd{display:flex;flex-wrap:wrap;gap:6px;padding-top:8px}
+.ct-bal{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.ct-bal b{flex:none;border-radius:999px;padding:3px 8px;font-size:12px}
+.ct-bal b.ok{background:rgba(48,209,88,.18);color:#30d158}
+.ct-bal b.high{background:rgba(255,176,32,.18);color:#ffb020}
+.ct-bal b.warn{background:rgba(255,159,10,.18);color:#ff9f0a}
+.ct-bal span{color:#d1d1d6;font-size:13px;line-height:1.35}
+.ct-warn{margin:0 0 8px;color:#ff9f0a;font-size:12px;line-height:1.4}
+.ct-dots{display:flex;gap:6px;margin:0 0 8px}
+.ct-dots i{width:10px;height:10px;border-radius:5px;display:block}
+.ct-dots i.ok{background:#30d158}
+.ct-dots i.miss{background:#ff9f0a}
+.ct-dots i.none{background:#3a3a3c}
+.ct-kbar{position:relative;height:22px;border-radius:11px;background:#2c2c2e;overflow:hidden;margin:8px 0}
+.ct-kbar div{height:100%;border-radius:11px}
+.ct-kbar div.ok{background:#30d158}
+.ct-kbar div.high{background:#ffb020}
+.ct-cmp{display:grid;grid-template-columns:52px 1fr 48px;align-items:center;gap:6px;margin-top:4px}
+.ct-cmp span,.ct-cmp b{color:#8e8e93;font-size:11px;font-weight:650}
+.ct-cmp div{height:8px;border-radius:4px;background:#2c2c2e;overflow:hidden}
+.ct-cmp i{display:block;height:100%;border-radius:4px;min-width:2px}
+.ct-cmp i.c{background:#64d2ff}
+.ct-cmp i.f{background:#ffd60a}
 .ct-seg2{display:flex;gap:6px;margin:0 0 8px}
 .ct-seg2 button{height:28px;padding:0 12px;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:transparent;color:#d1d1d6;font-size:12px;font-weight:700;cursor:pointer}
 .ct-seg2 button.on{background:#fff;color:#0b0b0b}

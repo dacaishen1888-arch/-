@@ -527,6 +527,12 @@ export type WeekBalance = {
   offset: "抵消" | "脂肪更多" | "碳水缺口更大" | "无明显对冲";
   tradeoff: string;
   conclusion: string;
+  badge: "平衡" | "偏高" | "注意";
+  bar: "ok" | "high";
+  reason: string;
+  warn: string;
+  proteinHits: number;
+  proteinOk: boolean;
 };
 
 export function weekBalance(w: WindowStats): WeekBalance {
@@ -557,13 +563,18 @@ export function weekBalance(w: WindowStats): WeekBalance {
   const tail = offset === "抵消" ? "一周热量基本持平" : offset === "脂肪更多" ? "脂肪多出的热量更多" : offset === "碳水缺口更大" ? "碳水少掉的热量更多" : "没有明显的脂肪和碳水对冲";
   const tradeoff = loggedDays.length ? `脂肪多 ${fatOverG}g≈${fatOverKcal}kcal，碳水少 ${carbShortG}g≈${carbShortKcal}kcal，${tail}` : "没有已记录的日子。";
   const trainCarbShort = loggedDays.some((d) => d.train && d.carbGap < -1);
-  let conclusion = "按最低值看，这一周还算稳。";
-  if (!loggedDays.length) conclusion = "这 7 天还没有饮食记录。";
-  else if (trainCarbShort && fatOverG >= 10) conclusion = "脂肪偏多挤掉了训练日碳水，建议训练日先保证碳水下限。";
-  else if (kcalNet < -150) conclusion = "一周热量超了，周末也算在内，先把脂肪收回来。";
-  else if (offset === "抵消") conclusion = "脂肪多出来的热量和碳水少掉的大致抵消。";
-  else if (carbShortG >= 40) conclusion = "碳水低于下限的日子偏多，训练日先补到最低。";
-  return { days, logged: loggedDays.length, kcalActual, kcalTarget, kcalNet, fatOverG, fatOverKcal, carbShortG, carbShortKcal, offset, tradeoff, conclusion };
+  const proteinHits = loggedDays.filter((d) => d.proteinHit).length;
+  const proteinOk = loggedDays.length > 0 && proteinHits * 7 >= loggedDays.length * 5;
+  const overPct = kcalTarget > 0 && (kcalActual - kcalTarget) / kcalTarget > 0.05;
+  const badge: WeekBalance["badge"] = !loggedDays.length ? "注意" : overPct ? "偏高" : proteinOk ? "平衡" : "注意";
+  const bar: WeekBalance["bar"] = overPct ? "high" : "ok";
+  const reason = !loggedDays.length ? "这 7 天还没有饮食记录。" : overPct ? `热量超出 ${kcalActual - kcalTarget} kcal。` : kcalNet > 0 ? `热量缺口 ${kcalNet} kcal，有利减脂。` : "热量与目标持平。";
+  const warns: string[] = [];
+  if (loggedDays.length && !proteinOk) warns.push(`蛋白达标 ${proteinHits}/${loggedDays.length}，未到记录天数的 5/7。`);
+  if (loggedDays.length && trainCarbShort && fatOverG >= 10) warns.push(`脂肪多 +${fatOverKcal}kcal 被碳水少 −${carbShortKcal}kcal 抵消，但训练日碳水不足。`);
+  const warn = warns.join("");
+  const conclusion = reason;
+  return { days, logged: loggedDays.length, kcalActual, kcalTarget, kcalNet, fatOverG, fatOverKcal, carbShortG, carbShortKcal, offset, tradeoff, conclusion, badge, bar, reason, warn, proteinHits, proteinOk };
 }
 
 export function streakCount(log: Record<string, readonly unknown[] | undefined>, today: string): number {
