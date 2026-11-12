@@ -307,9 +307,18 @@ describe("week balance", () => {
     expect(b.tradeoff).toContain("一周热量基本持平");
     expect(b.badge).toBe("平衡");
     expect(b.bar).toBe("ok");
-    expect(b.reason).toContain("热量缺口 50 kcal，有利减脂");
+    expect(b.reason).toBe("热量缺口 −50 kcal");
     expect(b.reason).not.toContain("偏低");
-    expect(b.warn).toContain("训练日碳水不足");
+    expect(b.warn).toBe("脂肪多吃挤掉了碳水，训练日先吃够碳水");
+    expect(b.p).toBe(train.pMin + rest.pMin);
+    expect(b.pMin).toBe(train.pMin + rest.pMin);
+    expect(b.pTone).toBe("ok");
+    expect(b.c).toBe(train.cMin - 40 + rest.cMin - 20);
+    expect(b.cMin).toBe(train.cMin + rest.cMin);
+    expect(b.cTone).toBe("low");
+    expect(b.f).toBe(train.f + 10 + rest.f + 8);
+    expect(b.fTarget).toBe(train.f + rest.f);
+    expect(b.fTone).toBe("high");
     expect(b.days.find((d) => d.date === "2026-11-06")?.carbHit).toBe(false);
     expect(b.days.find((d) => d.date === "2026-11-06")?.proteinHit).toBe(true);
   });
@@ -324,8 +333,11 @@ describe("week balance", () => {
     expect(b.offset).toBe("无明显对冲");
     expect(b.badge).toBe("平衡");
     expect(b.bar).toBe("ok");
-    expect(b.reason).toContain("持平");
+    expect(b.reason).toBe("热量缺口 −0 kcal");
     expect(b.warn).toBe("");
+    expect(b.pTone).toBe("ok");
+    expect(b.cTone).toBe("ok");
+    expect(b.fTone).toBe("ok");
     expect(b.kcalNet).toBe(0);
   });
   it("keeps a calorie deficit green and flags protein or displaced carbs in orange", () => {
@@ -334,26 +346,27 @@ describe("week balance", () => {
     }, "2026-11-06", pr));
     expect(over.badge).toBe("偏高");
     expect(over.bar).toBe("high");
-    expect(over.reason).toContain("超出");
+    expect(over.reason).toContain("超出 +");
     const lean = weekBalance(analyzeWindow({
       "2026-11-06": [food(2, train.kcal - 400, train.pMin, train.cMin, train.f)],
     }, "2026-11-06", pr));
     expect(lean.badge).toBe("平衡");
     expect(lean.bar).toBe("ok");
-    expect(lean.reason).toContain("有利减脂");
+    expect(lean.reason).toBe("热量缺口 −400 kcal");
     expect(lean.reason).not.toContain("偏低");
     const lowP = weekBalance(analyzeWindow({
       "2026-11-06": [food(3, train.kcal - 200, train.pMin - 40, train.cMin, train.f)],
     }, "2026-11-06", pr));
-    expect(lowP.badge).toBe("注意");
+    expect(lowP.badge).toBe("平衡");
     expect(lowP.bar).toBe("ok");
-    expect(lowP.warn).toContain("蛋白达标");
+    expect(lowP.pTone).toBe("low");
+    expect(lowP.warn).toBe("");
     expect(lowP.reason).not.toContain("偏低");
   });
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v41", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v41"');
+  it("bumps the cache to ct-v42", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v42"');
   });
 });
