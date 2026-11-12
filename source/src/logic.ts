@@ -505,7 +505,9 @@ export type WeekDayBalance = {
   f: number;
   k: number;
   pMin: number;
+  pMax: number;
   cMin: number;
+  cMax: number;
   targetF: number;
   targetK: number;
   carbGap: number;
@@ -527,20 +529,43 @@ export type WeekBalance = {
   offset: "抵消" | "脂肪更多" | "碳水缺口更大" | "无明显对冲";
   tradeoff: string;
   conclusion: string;
-  badge: "平衡" | "偏高" | "注意";
+  badge: "平衡" | "偏高" | "未记录";
   bar: "ok" | "high";
   reason: string;
   warn: string;
   proteinHits: number;
   proteinOk: boolean;
+  p: number;
+  pMin: number;
+  pMax: number;
+  c: number;
+  cMin: number;
+  cMax: number;
+  f: number;
+  fTarget: number;
+  pTone: MacroTone;
+  cTone: MacroTone;
+  fTone: MacroTone;
 };
+
+export type MacroTone = "ok" | "low" | "high";
+
+function bandTone(actual: number, min: number, max: number): MacroTone {
+  if (actual + 1e-6 < min) return "low";
+  if (actual > Math.max(min, max) + 1e-6) return "high";
+  return "ok";
+}
+
+function capTone(actual: number, cap: number): MacroTone {
+  return actual > cap + 1e-6 ? "high" : "ok";
+}
 
 export function weekBalance(w: WindowStats): WeekBalance {
   const days: WeekDayBalance[] = w.days.map((d) => {
     const logged = d.entries > 0;
     return {
       date: d.date, train: d.train, logged, p: d.p, c: d.c, f: d.f, k: d.k,
-      pMin: d.targetPMin, cMin: d.targetCMin, targetF: d.targetF, targetK: d.targetK,
+      pMin: d.targetPMin, pMax: d.targetPMax, cMin: d.targetCMin, cMax: d.targetCMax, targetF: d.targetF, targetK: d.targetK,
       carbGap: logged ? d.c - d.targetCMin : 0,
       fatGap: logged ? d.f - d.targetF : 0,
       proteinHit: logged && d.p + 1e-6 >= d.targetPMin,
@@ -566,15 +591,23 @@ export function weekBalance(w: WindowStats): WeekBalance {
   const proteinHits = loggedDays.filter((d) => d.proteinHit).length;
   const proteinOk = loggedDays.length > 0 && proteinHits * 7 >= loggedDays.length * 5;
   const overPct = kcalTarget > 0 && (kcalActual - kcalTarget) / kcalTarget > 0.05;
-  const badge: WeekBalance["badge"] = !loggedDays.length ? "注意" : overPct ? "偏高" : proteinOk ? "平衡" : "注意";
+  const badge: WeekBalance["badge"] = !loggedDays.length ? "未记录" : overPct ? "偏高" : "平衡";
   const bar: WeekBalance["bar"] = overPct ? "high" : "ok";
-  const reason = !loggedDays.length ? "这 7 天还没有饮食记录。" : overPct ? `热量超出 ${kcalActual - kcalTarget} kcal。` : kcalNet > 0 ? `热量缺口 ${kcalNet} kcal，有利减脂。` : "热量与目标持平。";
-  const warns: string[] = [];
-  if (loggedDays.length && !proteinOk) warns.push(`蛋白达标 ${proteinHits}/${loggedDays.length}，未到记录天数的 5/7。`);
-  if (loggedDays.length && trainCarbShort && fatOverG >= 10) warns.push(`脂肪多 +${fatOverKcal}kcal 被碳水少 −${carbShortKcal}kcal 抵消，但训练日碳水不足。`);
-  const warn = warns.join("");
+  const p = r0(loggedDays.reduce((a, d) => a + d.p, 0));
+  const c = r0(loggedDays.reduce((a, d) => a + d.c, 0));
+  const f = r0(loggedDays.reduce((a, d) => a + d.f, 0));
+  const pMin = r0(loggedDays.reduce((a, d) => a + d.pMin, 0));
+  const cMin = r0(loggedDays.reduce((a, d) => a + d.cMin, 0));
+  const fTarget = r0(loggedDays.reduce((a, d) => a + d.targetF, 0));
+  const pMax = r0(loggedDays.reduce((a, d) => a + d.pMax, 0));
+  const cMax = r0(loggedDays.reduce((a, d) => a + d.cMax, 0));
+  const pTone = bandTone(p, pMin, pMax);
+  const cTone = bandTone(c, cMin, cMax);
+  const fTone = capTone(f, fTarget);
+  const reason = !loggedDays.length ? "这 7 天还没有饮食记录" : kcalNet > 0 ? `热量缺口 −${kcalNet} kcal` : kcalNet < 0 ? `超出 +${-kcalNet} kcal` : "热量缺口 −0 kcal";
+  const warn = loggedDays.length && trainCarbShort && fatOverG >= 10 ? "脂肪多吃挤掉了碳水，训练日先吃够碳水" : "";
   const conclusion = reason;
-  return { days, logged: loggedDays.length, kcalActual, kcalTarget, kcalNet, fatOverG, fatOverKcal, carbShortG, carbShortKcal, offset, tradeoff, conclusion, badge, bar, reason, warn, proteinHits, proteinOk };
+  return { days, logged: loggedDays.length, kcalActual, kcalTarget, kcalNet, fatOverG, fatOverKcal, carbShortG, carbShortKcal, offset, tradeoff, conclusion, badge, bar, reason, warn, proteinHits, proteinOk, p, pMin, pMax, c, cMin, cMax, f, fTarget, pTone, cTone, fTone };
 }
 
 export function streakCount(log: Record<string, readonly unknown[] | undefined>, today: string): number {

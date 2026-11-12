@@ -1086,37 +1086,27 @@ function MealCapsules({ value, onChange, label }: { value: string; onChange: (m:
   return <div className="ct-mcaps" role="group" aria-label={label}>{MEALS.map((m: string) => <button type="button" key={m} className={m === value ? "on" : ""} aria-pressed={m === value} style={m === value ? { background: MEAL_C[m], borderColor: MEAL_C[m], color: "#0b0b0b" } : { color: MEAL_C[m], borderColor: `${MEAL_C[m]}88` }} onClick={() => onChange(m)}>{m}</button>)}</div>;
 }
 
-function gramDelta(n: number): string {
-  const v = r0(Math.abs(n));
-  if (v === 0) return "持平";
-  return n > 0 ? `多 ${v}g` : `少 ${v}g`;
+const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+function MacroBar({ name, actual, target, tone }: { name: string; actual: number; target: number; tone: "ok" | "low" | "high" }) {
+  const width = target > 0 ? Math.min(100, actual / target * 100) : 0;
+  return <div className="ct-mrow" data-testid={`week-${name}`}>
+    <b>{name}</b>
+    <span>{`${r0(actual)}/${r0(target)} g`}</span>
+    <i aria-hidden="true"><em className={tone} style={{ width: `${width}%` }} /></i>
+  </div>;
 }
 
 function WeekPanel({ wb }: { wb: ReturnType<typeof weekBalance> }) {
-  const W = 340, H = 108, mid = 46, pad = 4;
-  const slot = (W - pad * 2) / 7;
-  const maxG = Math.max(24, ...wb.days.flatMap((d) => [Math.abs(d.carbGap), Math.abs(d.fatGap)]));
-  const gy = (g: number) => mid - (g / maxG) * 32;
-  const maxK = Math.max(wb.kcalActual, wb.kcalTarget, 1);
-  const fatW = Math.max(wb.fatOverKcal, wb.carbShortKcal, 1);
-  return <div data-testid="week-panel">
-    <div className="ct-bal" data-testid="week-badge"><b className={wb.badge === "平衡" ? "ok" : wb.badge === "偏高" ? "high" : "warn"}>{wb.badge}</b><span>{wb.reason}</span></div>
-    {wb.warn ? <p className="ct-warn" data-testid="week-warn">{wb.warn}</p> : null}
-    <div className="ct-dots" aria-label="蛋白达标">{wb.days.map((d) => <i key={d.date} className={!d.logged ? "none" : d.proteinHit ? "ok" : "miss"} title={d.date} />)}</div>
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="每日碳水和脂肪差额，向上为多吃，向下为少吃">
-      <line x1={pad} x2={W - pad} y1={mid} y2={mid} stroke="#636366" strokeWidth="1" />
-      {wb.days.map((d, i) => {
-        const x = pad + i * slot + slot / 2;
-        if (!d.logged) return <g key={d.date}><rect x={x - 7} y={mid - 3} width={14} height={6} rx="2" fill="#3a3a3c" /><text x={x} y={H - 2} fontSize="8" textAnchor="middle" fill="#636366">{Number(d.date.slice(8))}</text></g>;
-        const bar = (gap: number, dx: number, color: string) => { const y1 = gy(0); const y2 = gy(gap); const top = Math.min(y1, y2); return <rect x={x + dx} y={top} width="5" height={Math.max(1, Math.abs(y2 - y1))} rx="1" fill={color} />; };
-        return <g key={d.date}>{bar(d.carbGap, -6, "#64d2ff")}{bar(d.fatGap, 1, "#ffd60a")}<text x={x} y={H - 2} fontSize="8" textAnchor="middle" fill="#8e8e93">{Number(d.date.slice(8))}</text></g>;
-      })}
-    </svg>
-    <p className="ct-note">蓝柱碳水、黄柱脂肪，中线为 0。向上多吃，向下少吃。灰块是未记录。</p>
-    <div className="ct-kbar" data-testid="week-kcal"><div className={wb.bar === "ok" ? "ok" : "high"} style={{ width: `${Math.min(100, wb.kcalActual / maxK * 100)}%` }} /></div>
-    <p className="ct-note">{`${wb.kcalActual}/${wb.kcalTarget} · ${wb.kcalNet > 0 ? `缺口 ${wb.kcalNet}` : wb.kcalNet < 0 ? `超出 ${-wb.kcalNet}` : "持平"} kcal`}</p>
-    <div className="ct-cmp"><span>碳水少</span><div><i className="c" style={{ width: `${wb.carbShortKcal / fatW * 100}%` }} /></div><b>{`−${wb.carbShortKcal}`}</b></div>
-    <div className="ct-cmp"><span>脂肪多</span><div><i className="f" style={{ width: `${wb.fatOverKcal / fatW * 100}%` }} /></div><b>{`+${wb.fatOverKcal}`}</b></div>
+  const badge = wb.badge === "偏高" ? "本周偏高" : wb.badge === "平衡" ? "本周平衡" : "未记录";
+  return <div className="ct-wcard" data-testid="week-panel">
+    <div className={`ct-wbadge ${wb.badge === "偏高" ? "high" : wb.badge === "平衡" ? "ok" : "none"}`} data-testid="week-badge">{badge}</div>
+    <p className="ct-wnum" data-testid="week-kcal">{wb.reason}</p>
+    <MacroBar name="蛋白" actual={wb.p} target={wb.pMin} tone={wb.pTone} />
+    <MacroBar name="碳水" actual={wb.c} target={wb.cMin} tone={wb.cTone} />
+    <MacroBar name="脂肪" actual={wb.f} target={wb.fTarget} tone={wb.fTone} />
+    <div className="ct-sqs" aria-label="每天热量">{wb.days.map((d) => <div key={d.date}><i className={!d.logged ? "none" : d.k > d.targetK ? "high" : "ok"} /><span>{`周${WEEKDAYS[weekday(d.date)]}`}</span></div>)}</div>
+    {wb.warn ? <p className="ct-whint" data-testid="week-warn">{wb.warn}</p> : null}
   </div>;
 }
 
@@ -1657,7 +1647,7 @@ export default function App() {
       <Fragment><div className="ct-card" data-testid="ana-card" data-end={date} data-logged={loggedN} data-avgk={ana.avgKLogged} data-over={ana.overCount}>
         <div className="ct-chead"><h2 className="ct-ctitle">{`近7天 · ${ana.days[0] ? `${Number(ana.days[0].date.slice(5, 7))}月${Number(ana.days[0].date.slice(8))}日` : ""} 至 ${Number(date.slice(5, 7))}月${Number(date.slice(8))}日`}</h2></div>
         <div className="ct-seg2" role="group" aria-label="分析范围"><button type="button" className={weekOn ? "" : "on"} aria-pressed={!weekOn} onClick={() => setWeekOn(false)}>每日</button><button type="button" className={weekOn ? "on" : ""} aria-pressed={weekOn} onClick={() => setWeekOn(true)}>一周</button></div>
-        {weekOn ? <WeekPanel wb={weekBalance(ana)} /> : <Fragment>
+        {weekOn ? <WeekPanel wb={weekBalance(ana)} /> : <div data-testid="day-view">
         <p className="ct-note">每一天只和自己的目标比，规则与今日圆环相同：实际热量高于目标才算超出。未记录不计入超标，也不算成没吃够。没有当天保存的目标时，按当前碳循环重算：训练日高碳，休息日低碳。</p>
         <div className="ct-metrics">
           <div className={`ct-metric ${ana.proteinDays > 0 && ana.proteinReached === ana.proteinDays ? "ct-hit" : "ct-need"}`} data-testid="protein-reach"><span>蛋白吃够</span><b>{ana.proteinReached}<small style={{ fontSize: 14, color: "#8e8e93" }}>{`/${ana.proteinDays} 天`}</small></b></div>
@@ -1685,7 +1675,7 @@ export default function App() {
           })}
         </div>
         <p className="ct-note">{loggedN ? `未记录 ${ana.unlogged} 天，不计入吃够天数和日均。` : "这 7 天还没有饮食记录。"}</p>
-        </Fragment>}
+        </div>}
       </div></Fragment>
       )}
 
@@ -1955,28 +1945,28 @@ select.ct-mini{width:88px}
 .ct-act{flex:none;width:32px;height:32px;border-radius:16px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .ct-act.on{background:#92e82a;border-color:#92e82a;color:#0b0b0b}
 .ct-mixadd{display:flex;flex-wrap:wrap;gap:6px;padding-top:8px}
-.ct-bal{display:flex;align-items:center;gap:8px;margin:0 0 8px}
-.ct-bal b{flex:none;border-radius:999px;padding:3px 8px;font-size:12px}
-.ct-bal b.ok{background:rgba(48,209,88,.18);color:#30d158}
-.ct-bal b.high{background:rgba(255,176,32,.18);color:#ffb020}
-.ct-bal b.warn{background:rgba(255,159,10,.18);color:#ff9f0a}
-.ct-bal span{color:#d1d1d6;font-size:13px;line-height:1.35}
-.ct-warn{margin:0 0 8px;color:#ff9f0a;font-size:12px;line-height:1.4}
-.ct-dots{display:flex;gap:6px;margin:0 0 8px}
-.ct-dots i{width:10px;height:10px;border-radius:5px;display:block}
-.ct-dots i.ok{background:#30d158}
-.ct-dots i.miss{background:#ff9f0a}
-.ct-dots i.none{background:#3a3a3c}
-.ct-kbar{position:relative;height:22px;border-radius:11px;background:#2c2c2e;overflow:hidden;margin:8px 0}
-.ct-kbar div{height:100%;border-radius:11px}
-.ct-kbar div.ok{background:#30d158}
-.ct-kbar div.high{background:#ffb020}
-.ct-cmp{display:grid;grid-template-columns:52px 1fr 48px;align-items:center;gap:6px;margin-top:4px}
-.ct-cmp span,.ct-cmp b{color:#8e8e93;font-size:11px;font-weight:650}
-.ct-cmp div{height:8px;border-radius:4px;background:#2c2c2e;overflow:hidden}
-.ct-cmp i{display:block;height:100%;border-radius:4px;min-width:2px}
-.ct-cmp i.c{background:#64d2ff}
-.ct-cmp i.f{background:#ffd60a}
+.ct-wcard{display:flex;flex-direction:column;gap:12px}
+.ct-wbadge{align-self:flex-start;font-size:22px;font-weight:800;line-height:1.2;padding:8px 14px;border-radius:14px}
+.ct-wbadge.ok{background:rgba(48,209,88,.18);color:#30d158}
+.ct-wbadge.high{background:rgba(255,176,32,.2);color:#ffb020}
+.ct-wbadge.none{background:rgba(255,255,255,.08);color:#8e8e93}
+.ct-wnum{margin:0;color:#fff;font-size:28px;font-weight:800;letter-spacing:-.03em;line-height:1.15}
+.ct-mrow{display:grid;grid-template-columns:42px minmax(0,1fr);column-gap:8px;row-gap:4px;align-items:baseline}
+.ct-mrow b{font-size:15px;color:#fff}
+.ct-mrow>span{justify-self:end;color:#d1d1d6;font-size:13px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ct-mrow>i{grid-column:1 / -1;display:block;height:8px;border-radius:4px;background:#2c2c2e;overflow:hidden}
+.ct-mrow em{display:block;height:100%;border-radius:4px}
+.ct-mrow em.ok{background:#30d158}
+.ct-mrow em.low{background:#ff9f0a}
+.ct-mrow em.high{background:#ffb020}
+.ct-sqs{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.ct-sqs div{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+.ct-sqs i{width:100%;aspect-ratio:1;max-height:36px;border-radius:8px;display:block}
+.ct-sqs i.ok{background:#30d158}
+.ct-sqs i.high{background:#ffb020}
+.ct-sqs i.none{background:#3a3a3c}
+.ct-sqs span{color:#8e8e93;font-size:11px;line-height:1.1;white-space:nowrap}
+.ct-whint{margin:0;color:#ff9f0a;font-size:13px;line-height:1.4}
 .ct-seg2{display:flex;gap:6px;margin:0 0 8px}
 .ct-seg2 button{height:28px;padding:0 12px;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:transparent;color:#d1d1d6;font-size:12px;font-weight:700;cursor:pointer}
 .ct-seg2 button.on{background:#fff;color:#0b0b0b}
