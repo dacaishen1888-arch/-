@@ -82,7 +82,7 @@ export function AiChat({ date, meal, today, setDate, setMeal, flash, onCommit, o
       setPending(turn.pending);
       if (turn.date && turn.intent !== "chat") { dateRef.current = turn.date; setDate(turn.date); }
       if (turn.intent !== "chat") {
-        const foods = turn.pending.filter((p) => p.source === "ai").map(pendingToFood);
+        const foods = turn.pending.filter((p) => p.source === "ai" && !p.missing).map(pendingToFood);
         if (foods.length) onRemember(foods);
       }
       pushBot(turn.reply || (turn.error ? "没有解析出内容，饮食记录没有改动。" : "…"));
@@ -95,14 +95,17 @@ export function AiChat({ date, meal, today, setDate, setMeal, flash, onCommit, o
 
   const confirm = () => {
     if (lock.current || busy || !pendingRef.current.length) return;
+    const ready = pendingRef.current.filter((p) => !p.missing).map((p) => ({ ...p, meal: p.meal || meal }));
+    const held = pendingRef.current.filter((p) => p.missing);
+    if (!ready.length) { setErr("营养未识别，请补充"); return; }
     lock.current = true;
-    const items = pendingRef.current.map((p) => ({ ...p, meal: p.meal || meal }));
     const when = dateRef.current;
-    pendingRef.current = [];
-    setPending([]);
-    onCommit(items, when);
-    const meals = [...new Set(items.map((i) => i.meal || meal))];
-    pushBot(`已添加到 ${when}${meals.length === 1 ? ` ${meals[0]}` : ""}，共 ${items.length} 样。数字是估算，可点撤销。`);
+    pendingRef.current = held;
+    setPending(held);
+    onCommit(ready, when);
+    const meals = [...new Set(ready.map((i) => i.meal || meal))];
+    pushBot(`已添加到 ${when}${meals.length === 1 ? ` ${meals[0]}` : ""}，共 ${ready.length} 样。数字是估算，可点撤销。`);
+    if (held.length) setErr("营养未识别，请补充");
     lock.current = false;
   };
 
@@ -174,7 +177,7 @@ export function AiChat({ date, meal, today, setDate, setMeal, flash, onCommit, o
           <div style={{ color: "#8e8e93", fontSize: 12 }}>还没写入饮食记录。克数改动会按原估算比例缩放。同名食物只会留一条。</div>
           {pending.map((p) => (
             <div key={p.id} data-testid={`pend-${p.name}`} style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-              <span style={{ flex: "1 1 140px", color: "#fff", fontSize: 15 }}>{p.name}<span style={{ color: "#8e8e93", fontSize: 12 }}>{` · ${p.source === "barcode" ? "条码" : "估算"} · 这份 ${Math.round(p.kcal)} kcal · 蛋白 ${p.protein.toFixed(1)} · 碳水 ${p.carbs.toFixed(1)} · 脂肪 ${p.fat.toFixed(1)} · 约 ${per100(p)}/100g`}</span></span>
+              <span style={{ flex: "1 1 140px", color: "#fff", fontSize: 15 }}>{p.name}<span style={{ color: p.missing ? "#ffb020" : "#8e8e93", fontSize: 12 }}>{p.missing ? " · 营养未识别，请补充" : ` · ${p.source === "barcode" ? "条码" : "估算"} · 这份 ${Math.round(p.kcal)} kcal · 蛋白 ${p.protein.toFixed(1)} · 碳水 ${p.carbs.toFixed(1)} · 脂肪 ${p.fat.toFixed(1)} · 约 ${per100(p)}/100g`}</span></span>
               <input aria-label={`${p.name} 克数`} inputMode="decimal" value={String(Math.round(p.grams * 10) / 10)} onChange={(e: ChangeEvent<HTMLInputElement>) => { const v = parseFloat(e.target.value); if (!(v >= 0)) return; setPending((ps) => ps.map((x) => x.id === p.id ? scalePending(x, v) : x)); }} style={{ width: 72, minHeight: 40, borderRadius: 10, border: "1px solid #34373c", background: "#0b0b0b", color: "#fff", fontSize: 16 }} />
               <span style={{ color: "#8e8e93" }}>克</span>
               <select aria-label={`${p.name} 餐次`} value={p.meal || meal} onChange={(e: ChangeEvent<HTMLSelectElement>) => setPending((ps) => ps.map((x) => x.id === p.id ? { ...x, meal: e.target.value } : x))} style={{ minHeight: 40, borderRadius: 10, border: "1px solid #34373c", background: "#0b0b0b", color: "#fff", fontSize: 16 }}>
