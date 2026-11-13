@@ -402,7 +402,7 @@ describe("natural week", () => {
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v44", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v44"');
+  it("bumps the cache to ct-v45", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v45"');
   });
 });

@@ -66,6 +66,61 @@ describe("chat turns do not write food by themselves", () => {
   });
 });
 
+describe("milk nutrition and stated grams", () => {
+  const per100 = { 能量: "266kJ", 蛋白质: "3.0g", 脂肪: "3.8g", 碳水化合物: "4.4g" };
+  it("converts kJ per 100g and scales 200g to about 127 kcal", () => {
+    const turn = resolveTurn([], "牛奶巴氏200克", JSON.stringify({
+      intent: "record",
+      reply: "每100g 能量 266 kJ、蛋白 3.0g、脂肪 3.8g、碳水 4.4g",
+      pending: [{ name: "牛奶巴氏", grams: 200, 每100g: per100 }],
+    }), "2026-11-12");
+    const milk = turn.pending[0];
+    expect(Math.round(milk.kcal)).toBe(127);
+    expect(milk.protein).toBeCloseTo(6, 5);
+    expect(milk.carbs).toBeCloseTo(8.8, 5);
+    expect(milk.fat).toBeCloseTo(7.6, 5);
+    expect(milk.missing).toBeFalsy();
+  });
+  it("estimates kcal from macros and reads nutrition out of the reply when the fields are zero", () => {
+    const estimated = resolveTurn([], "鸡胸100克", JSON.stringify({
+      intent: "record", reply: "估算", pending: [{ name: "鸡胸", grams: 100, kcal: 0, protein: "30g", carbs: "0", fat: "5g" }],
+    }), "2026-11-12");
+    expect(estimated.pending[0].kcal).toBeCloseTo(165, 5);
+    expect(estimated.pending[0].missing).toBeFalsy();
+    const fromReply = resolveTurn([], "牛奶巴氏200", JSON.stringify({
+      intent: "record",
+      reply: "牛奶巴氏每100g：能量266kJ，蛋白3.0g，脂肪3.8g，碳水4.4g",
+      pending: [{ name: "牛奶巴氏", grams: 200, kcal: 0, protein: 0, carbs: 0, fat: 0 }],
+    }), "2026-11-12");
+    expect(Math.round(fromReply.pending[0].kcal)).toBe(127);
+    expect(fromReply.pending[0].protein).toBeCloseTo(6, 5);
+    const blank = resolveTurn([], "神秘酱", JSON.stringify({
+      intent: "record", reply: "没有查到营养", pending: [{ name: "神秘酱", grams: 30, kcal: 0, protein: 0, carbs: 0, fat: 0 }],
+    }), "2026-11-12");
+    expect(blank.pending[0].missing).toBe(true);
+    expect(entriesFromPending(blank.pending, "午餐")).toEqual([]);
+  });
+  it("uses a gram amount the user already gave and does not ask again", () => {
+    const prev = [withBase({ id: "milk", name: "牛奶巴氏", grams: 100, kcal: 266 / 4.184, protein: 3, carbs: 4.4, fat: 3.8, source: "ai" })];
+    const ask = JSON.stringify({ intent: "chat", reply: "请输入牛奶巴氏的克数", pending: null });
+    for (const text of ["200", "200g", "200克", "200ml"]) {
+      const turn = resolveTurn(prev, text, ask, "2026-11-12");
+      expect(turn.pending[0].grams).toBe(200);
+      expect(Math.round(turn.pending[0].kcal)).toBe(127);
+      expect(turn.reply).not.toContain("请输入");
+    }
+    const same = resolveTurn([], "牛奶巴氏200ml", JSON.stringify({
+      intent: "record", reply: "请输入牛奶巴氏的克数", pending: [{ name: "牛奶巴氏", grams: 100, 每100g: per100 }],
+    }), "2026-11-12");
+    expect(same.pending).toHaveLength(1);
+    expect(same.pending[0].grams).toBe(200);
+    expect(Math.round(same.pending[0].kcal)).toBe(127);
+    expect(same.reply).not.toContain("请输入");
+    expect(buildChatMessages([], [], "200ml").find((m) => m.role === "system")?.content).toContain("不要再追问");
+    expect(buildChatMessages([], [], "200ml").find((m) => m.role === "system")?.content).toContain("4.184");
+  });
+});
+
 describe("callAiRaw", () => {
   it("sends the key only as a bearer header and reports a missing key without calling the network", async () => {
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {

@@ -52,6 +52,32 @@ describe("AiChat", () => {
     expect(items.map((x: { name: string; kcal: number }) => [x.name, x.kcal])).toEqual([["米饭", 232], ["鸡蛋", 144]]);
   });
 
+  it("shows scaled milk nutrition and will not confirm an unrecognized item", async () => {
+    localStorage.setItem("fl_ai", JSON.stringify({ key: "test-key", base: "https://example.test/v4", tm: "glm-4-flash", vm: "glm-4v-flash" }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({
+        intent: "record",
+        reply: "每100g 能量 266 kJ、蛋白 3.0g、脂肪 3.8g、碳水 4.4g",
+        pending: [{ name: "牛奶巴氏", grams: 200, 每100g: { 能量: "266kJ", 蛋白质: "3.0g", 脂肪: "3.8g", 碳水化合物: "4.4g" } }],
+      }))
+      .mockResolvedValueOnce(json({ intent: "record", reply: "没有查到营养", pending: [{ name: "神秘酱", grams: 30, kcal: 0, protein: 0, carbs: 0, fat: 0 }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AiChat {...props} />);
+    fireEvent.change(screen.getByTestId("ai-txt"), { target: { value: "牛奶巴氏200克" } });
+    fireEvent.click(screen.getByTestId("ai-send"));
+    expect((await screen.findByTestId("pend-牛奶巴氏")).textContent).toContain("这份 127 kcal");
+    expect(screen.getByTestId("pend-牛奶巴氏").textContent).toContain("蛋白 6.0");
+    expect(screen.getByTestId("pend-牛奶巴氏").textContent).toContain("碳水 8.8");
+    expect(screen.getByTestId("pend-牛奶巴氏").textContent).toContain("脂肪 7.6");
+    fireEvent.change(screen.getByTestId("ai-txt"), { target: { value: "神秘酱" } });
+    fireEvent.click(screen.getByTestId("ai-send"));
+    expect((await screen.findByTestId("pend-神秘酱")).textContent).toContain("营养未识别，请补充");
+    fireEvent.click(screen.getByTestId("ai-confirm"));
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByTestId("ai-error").textContent).toContain("营养未识别，请补充");
+    expect(screen.getByTestId("pend-神秘酱")).toBeTruthy();
+  });
+
   it("does not turn a nutrition question or a bad response into a food entry", async () => {
     localStorage.setItem("fl_ai", JSON.stringify({ key: "test-key", base: "https://example.test/v4", tm: "glm-4-flash", vm: "glm-4v-flash" }));
     const fetchMock = vi.fn()
