@@ -1,11 +1,11 @@
 import { createPortal } from "react-dom";
 import { type ChangeEvent, useRef, Page, Section, Text, Grid, Input, Select, Button, Segmented, Rows, Table, LineChart, WeekBars, Properties, Callout, NumberedList, Toggle, Steps, Floating, Fragment, useGrokTheme, useState, useEffect, useMemo } from "grok/canvas";
-import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, proteinBand, r0, scaleEntryGrams, scaleEntryKcal, seenReminders, shanghaiClock, shanghaiToday, streakCount, suggestMeal, todayAnalysis, weekBalance, weekday, weekDates, mondayOf, analyzeDates, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
+import { MEALS, PROFILE_DEFAULT, QTY_CHIPS, WHEY_DOSE, WHEY_NOTE, WHEY_SCOOP, addDays, analyzeWindow, applyQty, calcTargets, carbWhy, clampQty, migrateProteinTargets, migrateWheySupplement, dayDiff, dueReminders, entryFromFood, entryFromSupplement, fatLeftLabel, foodFromEntry as foodFromEntryEx, formatQty, holdPress, isBaseFoodName, isSameFoodName, isTrain, markReminderSeen, mergeSearchFoods, movingAverage, needsTrainCarb, pickReminder, proteinBand, r0, scaleEntryGrams, scaleEntryKcal, seenReminders, shanghaiClock, shanghaiToday, streakCount, suggestMeal, todayAnalysis, weekBalance, weekday, weekDates, mondayOf, analyzeDates, weeklyDeficit, type Body, type Entry, type Food, type HoldEvent, type HoldState, type Profile, type Reminder, type SavedDayTarget } from "./logic";
 import { AiChat } from "./AiChat";
 import { callAi, entriesFromPending, loadAi, pendingToFood, type AiCfg, type AiItem } from "./aiChat";
 
 type SuppItem = { n: string; dose: string; k: number; p: number; c: number; f: number };
-const DEF_SUPP: SuppItem[] = [{ n: "乳清蛋白", dose: "1勺", k: 150, p: 30, c: 4, f: 2 }, { n: "肌酸 5g", dose: "", k: 0, p: 0, c: 0, f: 0 }, { n: "锌镁片", dose: "", k: 0, p: 0, c: 0, f: 0 }];
+const DEF_SUPP: SuppItem[] = [{ n: "乳清蛋白", dose: WHEY_DOSE, ...WHEY_SCOOP }, { n: "肌酸 5g", dose: "", k: 0, p: 0, c: 0, f: 0 }, { n: "锌镁片", dose: "", k: 0, p: 0, c: 0, f: 0 }];
 
 // [名称, kcal, 蛋白, 碳水, 脂肪 (每100g), 默认克数, 单位说明]
 const RAW: [string, number, number, number, number, number, string][] = [
@@ -977,7 +977,7 @@ const BASE: Food[] = [
   ...RAW2.map((r: R2) => ({ n: r[0], k: r[1], p: r[2], c: r[3], f: r[4], g: r[5], u: r[6], t: r[7] })),
   ...RAW3.map((r: R2) => ({ n: r[0], k: r[1], p: r[2], c: r[3], f: r[4], g: r[5], u: r[6], t: r[7] })),
   ...RAW4.map((r: R2) => ({ n: r[0], k: r[1], p: r[2], c: r[3], f: r[4], g: r[5], u: r[6], t: r[7] })),
-  { n: "乳清蛋白(按勺)", k: 150, p: 30, c: 4, f: 2, g: 1, su: "勺", u: "1勺=30g蛋白，约40g粉、150kcal、碳水4g、脂肪2g，为常见产品估算，可按包装改", t: "补剂 蛋白粉 健身 高蛋白 whey" },
+  { n: "乳清蛋白(按勺)", ...WHEY_SCOOP, g: 1, su: "勺", u: WHEY_NOTE, t: "补剂 蛋白粉 健身 高蛋白 whey" },
   { n: "一水肌酸", k: 0, p: 0, c: 0, f: 0, g: 5, u: "每天3–5g，热量和三大营养素都按0计", t: "补剂 肌酸 健身 creatine" },
 ];
 const BASE_NAMES = BASE.map((b) => b.n);
@@ -994,6 +994,14 @@ const MEAL_I: Record<string, string> = { "早餐": "🌅", "训练后": "💪", 
 
 function load<T>(key: string, def: T): T { try { const s = localStorage.getItem(key); return s ? (JSON.parse(s) as T) : def; } catch (e) { return def; } }
 function save(key: string, v: unknown): void { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* ignore */ } }
+function initialSupp(): SuppItem[] {
+  const stored = load<SuppItem[]>("fl_supp_list", DEF_SUPP);
+  try {
+    if (localStorage.getItem("fl_supp_whey_v46") === "1") return stored;
+    localStorage.setItem("fl_supp_whey_v46", "1");
+    return migrateWheySupplement(stored);
+  } catch (e) { return stored; }
+}
 
 function Bar({ label, v, t, unit }: { label: string; v: number; t: number; unit: string }) {
   const th = useGrokTheme();
@@ -1240,6 +1248,9 @@ export default function App() {
   const [recentOpen, setRecentOpen] = useState<boolean>(false);
   const [mineOpen, setMineOpen] = useState<boolean>(false);
   const [myFoods, setMyFoods] = useState<Food[]>(() => load<Food[]>("fl_myfoods", []));
+  const [mineUndo, setMineUndo] = useState<{ food: Food; index: number; n: number } | null>(null);
+  const mineTim = useRef(0);
+  useEffect(() => () => window.clearTimeout(mineTim.current), []);
   const [saveMine, setSaveMine] = useState<boolean>(true);
   useEffect(() => save("fl_myfoods", myFoods), [myFoods]);
 
@@ -1252,7 +1263,7 @@ export default function App() {
   const [tpls, setTpls] = useState<Record<string, Entry[]>>(() => load<Record<string, Entry[]>>("fl_tpl", {}));
   useEffect(() => save("fl_water", water), [water]);
   useEffect(() => save("fl_supp", supp), [supp]);
-  const [suppList, setSuppList] = useState<SuppItem[]>(() => load<SuppItem[]>("fl_supp_list", DEF_SUPP));
+  const [suppList, setSuppList] = useState<SuppItem[]>(initialSupp);
   useEffect(() => save("fl_supp_list", suppList), [suppList]);
   const [waterBtns, setWaterBtns] = useState<number[]>(() => load<number[]>("fl_water_btns", [250, 500, -250]));
   useEffect(() => save("fl_water_btns", waterBtns), [waterBtns]);
@@ -1350,6 +1361,31 @@ export default function App() {
   const [bSel, setBSel] = useState<BSel[]>([]);
   const bTog = (it: BSel) => setBSel((S: BSel[]) => S.some((x: BSel) => x.key === it.key) ? S.filter((x: BSel) => x.key !== it.key) : [...S, it]);
   const bHas = (k: string) => bSel.some((x: BSel) => x.key === k);
+  const removeMyFood = (f: Food) => {
+    const index = myFoods.findIndex((x: Food) => x.n === f.n);
+    if (index < 0) return;
+    const food = myFoods[index];
+    setMyFoods((M: Food[]) => M.filter((x: Food) => x.n !== food.n));
+    setBSel((S: BSel[]) => S.filter((x: BSel) => x.f?.n !== food.n));
+    setMineUndo((o) => ({ food, index, n: (o ? o.n : 0) + 1 }));
+    window.clearTimeout(mineTim.current);
+    mineTim.current = window.setTimeout(() => setMineUndo(null), 5000);
+    setAT(null);
+    window.clearTimeout(aTim.current);
+  };
+  const undoMyFood = () => {
+    if (!mineUndo) return;
+    const { food, index } = mineUndo;
+    setMyFoods((M: Food[]) => {
+      if (M.some((x: Food) => x.n === food.n)) return M;
+      const next = [...M];
+      next.splice(Math.max(0, Math.min(index, next.length)), 0, food);
+      return next;
+    });
+    setMineUndo(null);
+    window.clearTimeout(mineTim.current);
+    flash("已撤销");
+  };
   const bEntry = (x: BSel): Omit<Entry, "id"> => { if (x.f) return entryFromFood(x.f, parseFloat(x.q) || x.f.g, meal); const e = x.e as Entry; const m = parseFloat(x.q) || 1; return { meal, name: e.name, grams: e.grams * m, k: e.k * m, p: e.p * m, c: e.c * m, f: e.f * m }; };
   const bCommit = () => { if (!bSel.length) return; cloneTo(bSel.map((x: BSel) => ({ ...bEntry(x), id: 0 }))); setBSel([]); setBMode(false); };
   const commitTray = () => { const foods = tray.map((t: { id: number; n: string; g: string; meal: string; x?: Food }) => t.x || FOODS.find((x: Food) => x.n === t.n)).filter((f: Food | undefined): f is Food => !!f); rememberFoods(foods); const es = tray.map((t: { id: number; n: string; g: string; meal: string; x?: Food }) => { const f = t.x || FOODS.find((x: Food) => x.n === t.n); return f ? entryFromFood(f, parseFloat(t.g) || f.g, t.meal) : null; }).filter(Boolean) as Omit<Entry, "id">[]; if (!es.length) return; cloneTo(es.map((e: Omit<Entry, "id">) => ({ ...e, id: 0 }))); setTray([]); };
@@ -1365,7 +1401,7 @@ export default function App() {
   const addWater = (n: number) => setWater((W: Record<string, number>) => ({ ...W, [date]: Math.max(0, (W[date] || 0) + n) }));
   const sp1 = supp[date] || [];
   const suppEntryName = (it: SuppItem) => `${it.n}${it.dose ? " " + it.dose : ""}`;
-  const isSuppLog = (e: Entry, it: SuppItem) => e.name === it.n || e.name.startsWith(it.n + " ×") || e.name.startsWith(suppEntryName(it));
+  const isSuppLog = (e: Entry, it: SuppItem) => e.name === it.n || e.name.startsWith(it.n + " ×") || e.name.startsWith(suppEntryName(it)) || ((it.dose || "").startsWith("1勺") && it.dose !== "1勺" && e.name.startsWith(it.n + " 1勺"));
   const togSupp = (n: string, qty = 1) => { const on = sp1.includes(n); const it = suppList.find((x: SuppItem) => x.n === n); setSupp((S: Record<string, string[]>) => ({ ...S, [date]: on ? (S[date] || []).filter((x: string) => x !== n) : [...(S[date] || []), n] })); if (!it) return; if (!on) addEntry({ ...entryFromSupplement(it, qty), meal: "加餐" }, false); else setLog((L: Record<string, Entry[]>) => ({ ...L, [date]: (L[date] || []).filter((e: Entry) => !isSuppLog(e, it)) })); };
   const setSuppAmount = (it: SuppItem, qty: number) => { const q = clampQty(qty); setPickQty((M) => ({ ...M, ["s:" + it.n]: q })); if (!sp1.includes(it.n)) return; setLog((L: Record<string, Entry[]>) => ({ ...L, [date]: (L[date] || []).map((e: Entry) => isSuppLog(e, it) ? { ...entryFromSupplement(it, q), id: e.id, meal: e.meal || "加餐" } : e) })); };
   const setEntryQty = (id: number, qty: number) => setLog((L: Record<string, Entry[]>) => ({ ...L, [date]: (L[date] || []).map((e: Entry) => e.id === id ? applyQty(e, qty) : e) }));
@@ -1434,7 +1470,7 @@ export default function App() {
 
   const sampleT: [string, string, string, number, number, number, number][] = [
     ["07:30 训练前早餐", "燕麦40g + 鸡蛋2个 + 香蕉1根", "", 402, 20, 55, 12],
-    ["10:30 训练后", "乳清1勺 + 米饭150g", "", 324, 34, 43, 3],
+    ["10:30 训练后", "乳清1勺 + 米饭150g", "", 292, 28, 41, 2],
     ["13:30 午餐", "米饭200g + 鸡胸150g + 西兰花200g + 油10g", "", 636, 57, 65, 17],
     ["18:30 晚餐", "红薯200g + 鲈鱼200g + 北豆腐150g + 菠菜200g + 油10g", "", 663, 65, 50, 25],
     ["加餐", "希腊酸奶150g + 杏仁15g", "", 197, 18, 9, 11],
@@ -1442,7 +1478,7 @@ export default function App() {
   const sampleR: [string, string, string, number, number, number, number][] = [
     ["08:30 早餐", "鸡蛋2个 + 全麦面包60g + 无糖豆浆300ml", "", 385, 27, 30, 18],
     ["12:30 午餐", "米饭150g + 鸡腿肉150g + 西兰花200g + 油10g", "", 707, 46, 52, 23],
-    ["15:30 加餐", "乳清1勺 + 苹果1个", "", 254, 31, 32, 2],
+    ["15:30 加餐", "乳清1勺 + 苹果1个", "", 222, 24, 29, 2],
     ["18:30 晚餐", "虾仁200g + 北豆腐150g + 蔬菜300g + 油10g", "", 476, 61, 21, 18],
   ];
   const sp = plan === "train" ? sampleT : sampleR;
@@ -1593,7 +1629,7 @@ export default function App() {
             {myFoods.length > 0 && <div>
               <button type="button" data-testid="mine-toggle" aria-expanded={mineOpen} onClick={() => setMineOpen(!mineOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", minHeight: 44, padding: 0, background: "none", border: "none", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left" }}><span>{`我的食物 (${myFoods.length})`}</span><span className="ct-chev" style={{ transform: mineOpen ? "rotate(90deg)" : "none" }}>›</span></button>
               {mineOpen && <div data-testid="mine-list" style={{ display: "flex", flexWrap: "wrap", gap: 8, maxHeight: "32vh", overflowY: "auto", marginTop: 8 }}>
-                {myFoods.map((f: Food) => <Btn key={f.n} label={`${bMode ? (bHas("f:" + f.n) ? "✓ " : "○ ") : ""}${f.n}${f.su ? ` ·每${f.su}` : " ·每100g"} · ${r0(f.k)}`} variant={bMode && bHas("f:" + f.n) ? "primary" : undefined} onClick={() => { if (bMode) { bTog({ key: "f:" + f.n, f, q: String(f.g) }); return; } const e = entryFromFood(f, f.g, meal); cloneTo([{ ...e, id: 0 }]); flash(`已加入 ${f.n}`); }} />)}
+                {myFoods.map((f: Food) => <div key={f.n} className="ct-mine"><Btn label={`${bMode ? (bHas("f:" + f.n) ? "✓ " : "○ ") : ""}${f.n}${f.su ? ` ·每${f.su}` : " ·每100g"} · ${r0(f.k)}`} variant={bMode && bHas("f:" + f.n) ? "primary" : undefined} onClick={() => { if (bMode) { bTog({ key: "f:" + f.n, f, q: String(f.g) }); return; } const e = entryFromFood(f, f.g, meal); cloneTo([{ ...e, id: 0 }]); flash(`已加入 ${f.n}`); }} /><button type="button" className="ct-del" aria-label={`删除 ${f.n}`} onClick={() => removeMyFood(f)}>🗑</button></div>)}
               </div>}
             </div>}
             {recent.length > 0 && <div>
@@ -1816,7 +1852,7 @@ export default function App() {
         <Text>饮水目标、饮水按钮和补剂列表请在「今日」页「饮水 · 补剂」卡片点 ✎ 编辑。</Text>
         <Properties items={[
           { label: "一水肌酸", value: "每天3–5g（食物库默认5g，0热量），每天固定吃，不用区分训练日和休息日；随水或随餐吃都可以。体重短期上升1kg左右是水分，不是脂肪。" },
-          { label: "乳清蛋白", value: "每天1–2勺补足蛋白缺口；按你的产品1勺=30g蛋白，热量约150kcal（约40g粉、碳水4g、脂肪2g，为估算，以包装为准，可用自定义食物按包装改）。" },
+          { label: "乳清蛋白", value: `每天1–2勺补足蛋白缺口；${WHEY_NOTE}。` },
           { label: "锌镁片", value: "睡前空腹，与钙/奶制品间隔2小时，有助睡眠质量。" },
           { label: "饮水", value: `每天约 ${r0((parseFloat(profile.w) || 80.1) * 35 / 100) / 10} L（35ml/kg），训练日再加0.5–1L；尿液淡黄为宜。` },
         ]} />
@@ -1862,8 +1898,8 @@ export default function App() {
       )}
       </div>
       {nudge && !aT && <div className="ct-nudge" role="status" data-testid="nudge"><span>{nudge.text}</span><button type="button" aria-label="关闭提醒" onClick={() => setNudge(null)}>关闭</button></div>}
-      {aT && <div key={aT.n} className="ct-atoast" role="status" aria-live="polite"><span>{aT.t}</span><button type="button" onClick={undoAT}>撤销</button></div>}
-      {msg && !aT && <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: "calc(120px + env(safe-area-inset-bottom) * 0.5)", zIndex: 60, background: "#1f1f1f", color: "#fff", border: "1px solid #34373c", padding: "10px 16px", borderRadius: 12, fontSize: 15 }}>{msg}</div>}
+      {mineUndo ? <div key={mineUndo.n} className="ct-atoast" role="status" aria-live="polite" data-testid="mine-undo"><span>{`已删除 ${mineUndo.food.n}`}</span><button type="button" onClick={undoMyFood}>撤销</button></div> : aT ? <div key={aT.n} className="ct-atoast" role="status" aria-live="polite"><span>{aT.t}</span><button type="button" onClick={undoAT}>撤销</button></div> : null}
+      {msg && !aT && !mineUndo && <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: "calc(120px + env(safe-area-inset-bottom) * 0.5)", zIndex: 60, background: "#1f1f1f", color: "#fff", border: "1px solid #34373c", padding: "10px 16px", borderRadius: 12, fontSize: 15 }}>{msg}</div>}
       <div style={{ height: "calc(120px + env(safe-area-inset-bottom) * 0.5)" }} aria-hidden="true" />
       {createPortal(<nav className="ct-tabbar">
         <div className="ct-hump" aria-hidden="true" /><svg className="ct-hump-line" width="188" height="20" viewBox="0 0 188 20" aria-hidden="true"><path d="M0 19.5 C30 19.5 52 18 69.3 10.8 A35 35 0 0 1 118.7 10.8 C136 18 158 19.5 188 19.5" fill="none" stroke="rgba(255,255,255,.12)" strokeWidth="1" /></svg>
@@ -1959,6 +1995,7 @@ select.ct-mini{width:88px}
 .ct-add{border-style:dashed;color:#8e8e93}
 .ct-ed{padding:0 4px 0 0;justify-content:space-between;cursor:default;gap:2px}.ct-edl{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:2px;height:100%;padding:0 0 0 8px;border:none;background:none;color:#eee;font-size:12px;cursor:pointer}.ct-edl span{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.ct-edl svg{flex:none;color:#8e8e93}
 .ct-del{flex:none;width:22px;height:22px;border-radius:11px;border:none;background:rgba(255,69,58,.16);font-size:11px;cursor:pointer;padding:0;line-height:1}
+.ct-mine{display:inline-flex;align-items:center;gap:2px;max-width:100%}
 .ct-seg{position:sticky;top:env(safe-area-inset-top);z-index:30;background:#000;padding:6px 0}.ct-seg>div{width:100%;align-self:stretch!important;box-sizing:border-box;display:grid!important;grid-template-columns:repeat(3,1fr)}
 .ct-gear{display:flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;border-radius:18px;border:.5px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:rgba(235,235,245,.6);cursor:pointer;transition:background .15s,color .15s;-webkit-tap-highlight-color:transparent}.ct-gear:active{background:rgba(255,255,255,.16);color:rgba(235,235,245,.85)}
 .ct-more summary{min-height:44px;display:flex;align-items:center;color:#9a9a9a;cursor:pointer}
