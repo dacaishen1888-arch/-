@@ -1,3 +1,4 @@
+import { estimateKnown, foodsMatch, looksLikeLabel, parseUtterance, pendingFromLabel, type LocalHit } from "./commonFoods";
 import { formatShanghai, r0, type Food } from "./logic";
 
 export type AiCfg = { key: string; base: string; tm: string; vm: string };
@@ -13,7 +14,7 @@ export type PendingFood = {
   carbs: number;
   fat: number;
   meal?: string;
-  source: "ai" | "barcode";
+  source: "ai" | "barcode" | "table";
   baseGrams: number;
   baseKcal: number;
   baseProtein: number;
@@ -43,9 +44,18 @@ const AI_SYS = `你是中餐营养估算助手，在手机上用简短中文和�
 - 每种食物只出现一次。grams 是该食物合计克数。kcal、protein、carbs、fat 是这一份的总量，不是每100克。若只知道每100克，按克数换算成这一份的总量再写入。
 - 能量若是 kJ 或千焦，先除以 4.184 换成 kcal。kcal、千卡、大卡是同一单位。不要把 kJ 原数当作 kcal，也不要把营养写成 0。
 - 用户已经给出克数就不要再追问。200、200g、200克、200ml、200毫升都算已经给出；牛奶等液体的 ml 按 1:1 当成克。输入框或上一句里已有克数时，直接使用，禁止回复「请输入克数」。
-- “两个鸡蛋”写成一条「鸡蛋」约100克，不要写成两条。一个鸡蛋约50克，一碗熟米饭约200克。
+- “两个鸡蛋”写成一条「鸡蛋」约100克，不要写成两条。一个鸡蛋约50克，一碗熟米饭约200克，一拳饭约150克，一掌肉约100克，一杯奶约250克，一勺油约10克，一勺乳清蛋白是30克粉。
 - 用户没说某一餐时 meal 用空字符串。不要决定日期。
 - reply 提醒这些是估算，而且还没写入饮食记录，需要用户点确认添加。`;
+
+export const LABEL_SYS = `你在读中国食品包装上的营养成分表。只输出 JSON，不要 markdown：
+{"readable":true,"name":"产品名","basis":"100g","servingGrams":null,"energy":266,"energyUnit":"kJ","protein":3,"fat":3.8,"carbs":4.4,"barcode":"","note":""}
+规则：
+- energy 保留标签原数字。单位是千焦或 kJ 时 energyUnit 写 kJ，不要自己换成 kcal。
+- 读不到的数字用 null，禁止用 0 冒充没读到的营养。
+- 每100克或每100毫升时 basis 为 100g。印了每份、食用份量或一勺多少克时，把克数写入 servingGrams。
+- 包装上的条码原样写入 barcode。
+- 只抄包装上印出来的字。读不到营养时 readable 为 false，能量和三大营养素为 null。`;
 
 export function loadAi(): AiCfg {
   try { return { ...AI_DEF, ...JSON.parse(localStorage.getItem("fl_ai") || "{}") }; }
@@ -154,23 +164,26 @@ function classifyKey(key: string): { kind: MacroKind | null; per100: boolean } {
   return { kind: null, per100 };
 }
 
-type MacroBag = { kcal: number; protein: number; carbs: number; fat: number; per100: boolean; found: boolean };
+type MacroBag = { kcal: number; protein: number; carbs: number; fat: number; per100: boolean; direct: boolean; found: boolean };
 
 function emptyBag(): MacroBag {
-  return { kcal: 0, protein: 0, carbs: 0, fat: 0, per100: false, found: false };
+  return { kcal: 0, protein: 0, carbs: 0, fat: 0, per100: false, direct: false, found: false };
 }
 
 function takeMacro(bag: MacroBag, kind: MacroKind, amount: Amount, key: string, per100: boolean) {
   const v = amount.value;
   if (!(v > 0)) return;
+  let wrote = false;
   if (kind === "kcal") {
     const kj = isKj(amount.unit, key);
-    if (kj) { if (!(bag.kcal > 0)) bag.kcal = v / 4.184; }
-    else if (!(bag.kcal > 0) || /kcal|千卡|大卡|卡路里/.test(normKey(amount.unit + key))) bag.kcal = v;
-  } else if (kind === "p" && !(bag.protein > 0)) bag.protein = v;
-  else if (kind === "c" && !(bag.carbs > 0)) bag.carbs = v;
-  else if (kind === "f" && !(bag.fat > 0)) bag.fat = v;
-  if (per100) bag.per100 = true;
+    if (kj) { if (!(bag.kcal > 0)) { bag.kcal = v / 4.184; wrote = true; } }
+    else if (!(bag.kcal > 0) || /kcal|千卡|大卡|卡路里/.test(normKey(amount.unit + key))) { bag.kcal = v; wrote = true; }
+  } else if (kind === "p" && !(bag.protein > 0)) { bag.protein = v; wrote = true; }
+  else if (kind === "c" && !(bag.carbs > 0)) { bag.carbs = v; wrote = true; }
+  else if (kind === "f" && !(bag.fat > 0)) { bag.fat = v; wrote = true; }
+  if (!wrote) return;
+  if (per100) { if (!bag.direct) bag.per100 = true; }
+  else { bag.direct = true; bag.per100 = false; }
   bag.found = true;
 }
 
@@ -239,15 +252,15 @@ function asItem(x: Record<string, unknown>, source: PendingFood["source"], raw =
   const bag = emptyBag();
   walkNutrition(x, bag);
   const fromText = nutritionFromText(raw);
-  if (!bag.found && fromText) {
-    bag.kcal = fromText.kcal; bag.protein = fromText.protein; bag.carbs = fromText.carbs; bag.fat = fromText.fat; bag.per100 = fromText.per100; bag.found = true;
-  } else if (bag.found && fromText?.per100 && (closeEnough(bag.protein, fromText.protein) || closeEnough(bag.kcal, fromText.kcal) || closeEnough(bag.fat, fromText.fat))) {
+  if (!bag.found && fromText?.found) {
+    bag.kcal = fromText.kcal; bag.protein = fromText.protein; bag.carbs = fromText.carbs; bag.fat = fromText.fat; bag.per100 = fromText.per100; bag.direct = !fromText.per100; bag.found = true;
+  } else if (bag.found && !bag.direct && fromText?.per100 && (closeEnough(bag.protein, fromText.protein) || closeEnough(bag.kcal, fromText.kcal) || closeEnough(bag.fat, fromText.fat))) {
     bag.per100 = true;
   }
   const done = finishMacros(bag, grams);
   const missing = !(done.kcal > 0) && !(done.protein > 0) && !(done.carbs > 0) && !(done.fat > 0);
   const meal = MEAL_SET.has(mealRaw) ? mealRaw : undefined;
-  if (done.per100 && grams > 0) {
+  if (done.per100 && !bag.direct && grams > 0) {
     return scalePending(withBase({ id: newPendingId(), name, grams: 100, kcal: done.kcal, protein: done.protein, carbs: done.carbs, fat: done.fat, meal, source, missing, baseGrams: 100, baseKcal: done.kcal, baseProtein: done.protein, baseCarbs: done.carbs, baseFat: done.fat }), grams);
   }
   return withBase({ id: newPendingId(), name, grams, kcal: done.kcal, protein: done.protein, carbs: done.carbs, fat: done.fat, meal, source, missing });
@@ -273,14 +286,34 @@ export function portionsFromText(text: string): { name?: string; grams: number }
   return found.map(({ name, grams }) => ({ name, grams }));
 }
 
-function hydrateMissing(p: PendingFood, raw: string): PendingFood {
-  const from = nutritionFromText(raw);
-  if (!from?.found) return p;
-  const done = finishMacros(from, p.grams || 100);
-  if (!(done.kcal > 0) && !(done.protein > 0) && !(done.carbs > 0) && !(done.fat > 0)) return p;
-  const baseG = done.per100 ? 100 : (p.grams || 100);
-  const item = withBase({ ...p, grams: baseG, kcal: done.kcal, protein: done.protein, carbs: done.carbs, fat: done.fat, missing: false, baseGrams: baseG, baseKcal: done.kcal, baseProtein: done.protein, baseCarbs: done.carbs, baseFat: done.fat });
-  return done.per100 && p.grams > 0 && Math.abs(p.grams - baseG) > 0.01 ? scalePending(item, p.grams) : item;
+function scopeFor(name: string, raw: string, names: string[]): string {
+  if (names.filter(Boolean).length <= 1) return raw;
+  const idx = name ? raw.indexOf(name) : -1;
+  if (idx < 0) return "";
+  let end = Math.min(raw.length, idx + 180);
+  for (const other of names) {
+    if (!other || other === name) continue;
+    const j = raw.indexOf(other, idx + name.length);
+    if (j > idx && j < end) end = j;
+  }
+  return raw.slice(idx, end);
+}
+
+function hydrateMissing(p: PendingFood, raw: string, names: string[], library?: readonly Food[]): PendingFood {
+  const from = nutritionFromText(scopeFor(p.name, raw, names));
+  let next = p;
+  if (from?.found) {
+    const done = finishMacros(from, p.grams || 100);
+    if (done.kcal > 0 || done.protein > 0 || done.carbs > 0 || done.fat > 0) {
+      const baseG = done.per100 ? 100 : (p.grams || 100);
+      const item = withBase({ ...p, grams: baseG, kcal: done.kcal, protein: done.protein, carbs: done.carbs, fat: done.fat, missing: false, baseGrams: baseG, baseKcal: done.kcal, baseProtein: done.protein, baseCarbs: done.carbs, baseFat: done.fat });
+      next = done.per100 && p.grams > 0 && Math.abs(p.grams - baseG) > 0.01 ? scalePending(item, p.grams) : item;
+    }
+  }
+  if (!next.missing) return next;
+  const known = estimateKnown(next.name, next.grams, library);
+  if (!known || known.missing) return next;
+  return withBase({ ...next, grams: known.grams, kcal: known.kcal, protein: known.protein, carbs: known.carbs, fat: known.fat, missing: false });
 }
 
 function asksForGrams(reply: string): boolean {
@@ -295,7 +328,7 @@ function applyPortions(pending: PendingFood[], userText: string, reply: string):
   const asked = reply.match(/请输入\s*(.+?)\s*的?\s*克/);
   for (const part of parts) {
     let idx = -1;
-    if (part.name) idx = next.findIndex((p) => normName(p.name) === normName(part.name || ""));
+    if (part.name) idx = next.findIndex((p) => normName(p.name) === normName(part.name || "") || foodsMatch(p.name, part.name || ""));
     if (idx < 0 && !part.name) {
       if (asked?.[1]) idx = next.findIndex((p) => asked[1].includes(p.name) || p.name.includes(asked[1].replace(/的克.*/, "")));
       if (idx < 0 && next.length === 1) idx = 0;
@@ -314,18 +347,27 @@ function applyPortions(pending: PendingFood[], userText: string, reply: string):
   return { pending: next, applied };
 }
 
-export function parseModelPayload(raw: string): { intent: TurnResult["intent"] | ""; reply: string; pending: PendingFood[] | null; items: PendingFood[]; ops: { op: string; name: string }[]; explicitPending: boolean } {
-  let s = String(raw || "").replace(/```(?:json)?/gi, "").trim();
+function parseLoose(raw: string): unknown {
+  let s = String(raw || "").replace(/```(?:json)?/gi, "").replace(/[“”]/g, "\"").trim();
   const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  if (a >= 0 && b > a) s = s.slice(a, b + 1);
-  let o: unknown;
-  try { o = JSON.parse(s); }
-  catch {
-    const m = s.match(/\[[\s\S]*\]/);
-    if (!m) throw new Error("AI返回内容无法解析");
-    o = { items: JSON.parse(m[0]) };
-  }
-  if (Array.isArray(o)) o = { items: o };
+  const c = s.indexOf("["), d = s.lastIndexOf("]");
+  if (a >= 0 && b > a && (c < 0 || a < c)) s = s.slice(a, b + 1);
+  else if (c >= 0 && d > c) s = s.slice(c, d + 1);
+  else throw new Error("AI返回内容无法解析");
+  s = s.replace(/,\s*([}\]])/g, "$1");
+  try { return JSON.parse(s); }
+  catch { /* trailing commas already removed; try quoted keys */ }
+  try { return JSON.parse(s.replace(/([{,]\s*)([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]*)\s*:/g, "$1\"$2\":")); }
+  catch { throw new Error("AI返回内容无法解析"); }
+}
+
+function rowName(x: Record<string, unknown>): string {
+  return String(x.name ?? x.食物 ?? x.名称 ?? "").trim();
+}
+
+export function parseModelPayload(raw: string): { intent: TurnResult["intent"] | ""; reply: string; pending: PendingFood[] | null; items: PendingFood[]; ops: { op: string; name: string }[]; explicitPending: boolean } {
+  const o0 = parseLoose(raw);
+  const o = Array.isArray(o0) ? { items: o0 } : o0;
   const rec = (o && typeof o === "object" ? o : {}) as Record<string, unknown>;
   const intentRaw = String(rec.intent || "");
   const intent = intentRaw === "record" || intentRaw === "revise" || intentRaw === "chat" ? intentRaw : "";
@@ -335,8 +377,11 @@ export function parseModelPayload(raw: string): { intent: TurnResult["intent"] |
   const pendingRows = explicitPending && rec.pending != null ? readList(rec.pending) : [];
   const itemRows = readList(rec.items);
   const ops = [...pendingRows, ...itemRows].filter((x) => x.op).map((x) => ({ op: String(x.op), name: String(x.name || "") }));
-  const pending = explicitPending ? (rec.pending == null ? null : pendingRows.map((x) => asItem(x, "ai", raw)).filter((x): x is PendingFood => !!x)) : null;
-  const items = (pending ? pendingRows : itemRows).map((x) => asItem(x, "ai", raw)).filter((x): x is PendingFood => !!x);
+  const rows = pendingRows.length ? pendingRows : itemRows;
+  const names = rows.map(rowName).filter(Boolean);
+  const readItem = (x: Record<string, unknown>) => asItem(x, "ai", scopeFor(rowName(x), raw, names));
+  const pending = explicitPending ? (rec.pending == null ? null : pendingRows.map(readItem).filter((x): x is PendingFood => !!x)) : null;
+  const items = (pending ? pendingRows : itemRows).map(readItem).filter((x): x is PendingFood => !!x);
   return { intent, reply, pending, items, ops, explicitPending };
 }
 
@@ -380,14 +425,110 @@ function keepUnmentioned(prev: PendingFood[], next: PendingFood[], userText: str
   return [...next, ...extra];
 }
 
-export function resolveTurn(prev: PendingFood[], userText: string, raw: string, today: string): TurnResult {
+export function pendingFromHit(hit: LocalHit, meal?: string): PendingFood {
+  const chosen = hit.meal && MEAL_SET.has(hit.meal) ? hit.meal : meal;
+  const missing = !!hit.missing || (!(hit.kcal > 0) && !(hit.protein > 0) && !(hit.carbs > 0) && !(hit.fat > 0));
+  return withBase({ id: newPendingId(), name: hit.name, grams: hit.grams, kcal: hit.kcal, protein: hit.protein, carbs: hit.carbs, fat: hit.fat, meal: chosen, source: "table", missing });
+}
+
+function sumPending(a: PendingFood, b: PendingFood): PendingFood {
+  return withBase({ ...a, grams: a.grams + b.grams, kcal: a.kcal + b.kcal, protein: a.protein + b.protein, carbs: a.carbs + b.carbs, fat: a.fat + b.fat, meal: a.meal || b.meal, missing: !!(a.missing && b.missing) });
+}
+
+function localSummary(items: PendingFood[], offline = false): string {
+  const bits = items.map((p) => p.missing ? `${p.name}（营养未识别，请补充）` : `${p.name} ${r0(p.grams)}g 约 ${r0(p.kcal)} kcal`);
+  return `${offline ? "未连接模型，已用内置食物表估算" : "整理好了"}：${bits.join("、")}。点确认添加才会写入记录。`;
+}
+
+export function addLocalHit(prev: PendingFood[], hit: LocalHit, meal?: string): PendingFood[] {
+  const item = pendingFromHit(hit, meal);
+  const i = prev.findIndex((p) => foodsMatch(p.name, item.name));
+  if (i < 0) return [...prev, item];
+  const next = [...prev];
+  next[i] = sumPending(prev[i], item);
+  return next;
+}
+
+export function fallbackTurn(prev: PendingFood[], userText: string, today: string, library?: readonly Food[]): TurnResult | null {
+  if (looksLikeLabel(userText)) {
+    const label = pendingFromLabel(userText, userText);
+    const item = pendingFromHit({ name: label.name, grams: label.grams, kcal: label.kcal, protein: label.protein, carbs: label.carbs, fat: label.fat, missing: label.missing });
+    const i = prev.findIndex((p) => foodsMatch(p.name, item.name));
+    const pending = i < 0 ? [...prev, item] : prev.map((p, idx) => (idx === i ? { ...item, id: p.id, meal: p.meal || item.meal } : p));
+    return { intent: "record", pending, reply: label.reply, date: dateHint(userText, today) };
+  }
+  const u = parseUtterance(userText, library);
+  const hinted = u.kind === "question" ? null : dateHint(userText, today);
+  if (u.kind === "question" || u.kind === "none") return null;
+  if (u.kind === "clear") return { intent: "revise", pending: [], reply: "已清空待添加。饮食记录没有改动。", date: hinted };
+  if (u.kind === "grams") {
+    if (prev.length !== 1 || !(u.grams && u.grams > 0)) return null;
+    const p = scalePending(prev[0], u.grams);
+    return { intent: "revise", pending: [p], reply: `已按 ${u.grams}g 估算 ${p.name}。点确认添加才会写入。`, date: hinted };
+  }
+  if (u.kind === "remove") {
+    const next = prev.filter((p) => !u.names.some((n) => foodsMatch(p.name, n)) && !u.names.some((n) => p.name.includes(n)));
+    return { intent: "revise", pending: next, reply: "已从待添加拿掉。饮食记录没有改动。", date: hinted };
+  }
+  const next = [...prev];
+  if (u.kind === "revise" && u.grams && u.target) {
+    const i = next.findIndex((p) => foodsMatch(p.name, u.target || ""));
+    if (i >= 0) next[i] = scalePending(next[i], u.grams);
+    else {
+      const known = estimateKnown(u.target, u.grams, library);
+      if (known) next.push(pendingFromHit(known));
+    }
+    return { intent: "revise", pending: next, reply: localSummary(next, true), date: hinted };
+  }
+  for (const hit of u.foods) {
+    const item = pendingFromHit(hit);
+    const i = next.findIndex((p) => foodsMatch(p.name, item.name));
+    if (i < 0) next.push(item);
+    else if (u.kind === "add") next[i] = sumPending(next[i], item);
+    else next[i] = { ...item, id: next[i].id, meal: item.meal || next[i].meal };
+  }
+  if (!u.foods.length) return null;
+  return { intent: u.kind === "record" ? "record" : "revise", pending: next, reply: localSummary(next, true), date: hinted };
+}
+
+function supplement(next: PendingFood[], userText: string, library?: readonly Food[]): PendingFood[] {
+  const u = parseUtterance(userText, library);
+  if (u.kind !== "record" && u.kind !== "add" && u.kind !== "revise") return next;
+  const out = [...next];
+  for (const hit of u.foods) {
+    const i = out.findIndex((p) => foodsMatch(p.name, hit.name));
+    if (i < 0) out.push(pendingFromHit(hit));
+    else if (out[i].missing && !hit.missing) out[i] = { ...pendingFromHit(hit), id: out[i].id, meal: out[i].meal || hit.meal };
+  }
+  return out;
+}
+
+export function resolveTurn(prev: PendingFood[], userText: string, raw: string, today: string, library?: readonly Food[]): TurnResult {
   const local = classifyUserText(userText);
   const hinted = local === "question" ? null : dateHint(userText, today);
   const gavePortion = portionsFromText(userText).length > 0;
+  const uttered = parseUtterance(userText, library);
+  const utteredFood = (uttered.kind === "record" || uttered.kind === "add" || uttered.kind === "revise") && uttered.foods.length > 0;
+  if (local === "question" && !gavePortion) {
+    let reply = "这是营养问题，我不会把它记成食物，也不会改饮食记录。";
+    try {
+      const peeked = parseModelPayload(raw);
+      if (peeked.reply) reply = peeked.reply;
+    } catch { /* the question still must not become a food */ }
+    return { intent: "chat", pending: prev, reply, date: null };
+  }
+  if (looksLikeLabel(userText)) {
+    const labeled = fallbackTurn(prev, userText, today, library);
+    if (labeled) return labeled;
+  }
   let parsed: ReturnType<typeof parseModelPayload>;
   try { parsed = parseModelPayload(raw); }
-  catch (e) { return { intent: "chat", pending: prev, reply: "", error: e instanceof Error ? e.message : "AI返回内容无法解析", date: null }; }
-  if ((local === "question" && !gavePortion) || (parsed.intent === "chat" && !gavePortion)) {
+  catch (e) {
+    const fb = fallbackTurn(prev, userText, today, library);
+    if (fb) return fb;
+    return { intent: "chat", pending: prev, reply: "", error: e instanceof Error ? e.message : "AI返回内容无法解析", date: null };
+  }
+  if (parsed.intent === "chat" && !gavePortion && local !== "food" && !utteredFood) {
     const reply = parsed.reply || "这是营养问题，我不会把它记成食物，也不会改饮食记录。";
     return { intent: "chat", pending: prev, reply, date: null };
   }
@@ -397,19 +538,23 @@ export function resolveTurn(prev: PendingFood[], userText: string, raw: string, 
   const incoming = parsed.pending ?? parsed.items;
   let next = parsed.explicitPending && parsed.pending != null ? keepUnmentioned(prev, dedupeIncoming(parsed.pending).map((it) => reconcile(prev, it)), userText) : upsert(prev, incoming);
   for (const op of parsed.ops) {
-    if (op.op === "remove" && op.name) next = next.filter((p) => normName(p.name) !== normName(op.name));
+    if (op.op === "remove" && op.name) next = next.filter((p) => normName(p.name) !== normName(op.name) && !foodsMatch(p.name, op.name));
   }
   if (/去掉|删掉|不要/.test(userText)) {
-    next = next.filter((p) => !userText.includes(p.name));
-  }
-  if (!next.length && !incoming.length && !gavePortion) {
-    return { intent: parsed.intent || "record", pending: prev, reply: parsed.reply || "没有识别出要记录的食物，待添加没有改。", date: hinted };
+    next = next.filter((p) => !userText.includes(p.name) && !(uttered.kind === "remove" && uttered.names.some((n) => foodsMatch(p.name, n))));
   }
   const applied = applyPortions(next.length ? next : prev, userText, parsed.reply);
-  next = applied.pending.map((p) => p.missing ? hydrateMissing(p, raw) : p);
+  const names = applied.pending.map((p) => p.name);
+  next = applied.pending.map((p) => (p.missing ? hydrateMissing(p, raw, names, library) : p));
+  next = supplement(next, userText, library);
+  if (!next.length) {
+    return { intent: parsed.intent || "record", pending: prev, reply: parsed.reply || "没有识别出要记录的食物，待添加没有改。", date: hinted };
+  }
   let reply = parsed.reply || `整理了 ${next.length} 样待添加。这是估算，点确认添加才会写入记录。`;
   if (applied.applied && asksForGrams(reply)) {
     reply = `已按你给的份量估算：${next.map((p) => `${p.name} ${r0(p.grams)}g`).join("、")}。这是估算，点确认添加才会写入记录。`;
+  } else if ((parsed.intent === "chat" || !parsed.reply) && utteredFood) {
+    reply = localSummary(next);
   }
   return { intent: parsed.intent === "chat" ? "revise" : (parsed.intent || "record"), pending: next, reply, date: hinted };
 }
@@ -464,7 +609,7 @@ export async function callAi(cfg: AiCfg, text: string, img?: string): Promise<Ai
 export function pendingToFood(p: PendingFood): Food {
   const g = p.grams > 0 ? p.grams : 100;
   const m = 100 / g;
-  return { n: p.name, k: r0(p.kcal * m), p: +(p.protein * m).toFixed(1), c: +(p.carbs * m).toFixed(1), f: +(p.fat * m).toFixed(1), g, u: "100g", t: p.source === "barcode" ? "条码" : "AI", mine: true };
+  return { n: p.name, k: r0(p.kcal * m), p: +(p.protein * m).toFixed(1), c: +(p.carbs * m).toFixed(1), f: +(p.fat * m).toFixed(1), g, u: "100g", t: p.source === "barcode" ? "条码" : p.source === "table" ? "内置" : "AI", mine: true };
 }
 
 export function entriesFromPending(items: PendingFood[], fallbackMeal: string): { meal: string; name: string; grams: number; k: number; p: number; c: number; f: number }[] {
