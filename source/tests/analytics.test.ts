@@ -421,7 +421,7 @@ describe("v46 whey scoop migration", () => {
 });
 
 describe("service worker", () => {
-  it("bumps the cache to ct-v46", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v46"');
+  it("bumps the cache to ct-v47", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v47"');
   });
 });

@@ -1604,7 +1604,7 @@ export default function App() {
                 <Btn label={`添加 ${bSel.length} 样`} variant="primary" full onClick={bCommit} />
               </div>}
               <div style={{ display: "flex", gap: 8 }}><Btn label={showAi ? "收起对话" : "💬 对话记饮食 · 拍照 · 扫码"} onClick={() => setShowAi(!showAi)} /></div>
-              {showAi && <AiChat date={date} meal={meal} today={today} setDate={setDate} setMeal={setMeal} flash={flash} onRemember={(fs: Food[]) => rememberFoods(fs)} onCommit={(items, when) => { const es = entriesFromPending(items, meal).map((e) => ({ ...e, id: 0 })); rememberFoods(items.map(pendingToFood)); cloneTo(es, when, false); }} />}
+              <AiChat compact={!showAi} foods={BASE} date={date} meal={meal} today={today} setDate={setDate} setMeal={setMeal} flash={flash} onRemember={(fs: Food[]) => rememberFoods(fs)} onCommit={(items, when) => { const es = entriesFromPending(items, meal).map((e) => ({ ...e, id: 0 })); rememberFoods(items.map(pendingToFood)); cloneTo(es, when, false); }} />
               {q.trim() && !pick && matches.length > 0 && (
                 <div style={{ border: `1px solid ${th.border.default}`, borderRadius: 10, maxHeight: "55vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
                   {matches.slice(0, 30).map((f: Food) => (
@@ -2103,6 +2103,9 @@ select.ct-mini{width:88px}
 .ct-st.ok{background:rgba(48,209,88,.18);color:#30d158}
 .ct-st.over{background:rgba(255,69,58,.18);color:#ff453a}
 .ct-st.none{background:rgba(255,255,255,.08);color:#aeaeb2}
+.ct-sc{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+.ct-sc button,.ct-foods button{flex:0 0 auto;min-height:36px;padding:0 10px;border-radius:999px;border:1px solid #3a3a3c;background:#1c1c1e;color:#f2f3f5;font-size:13px;font-weight:650}
+.ct-foods{display:flex;flex-wrap:wrap;gap:6px}
 .ct-chat{display:flex;flex-direction:column;gap:8px;max-height:42vh;overflow-y:auto;padding:2px}
 .ct-bub{max-width:92%;padding:8px 12px;border-radius:16px;font-size:15px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
 .ct-bub.user{align-self:flex-end;background:#0a84ff;color:#fff;border-bottom-right-radius:6px}

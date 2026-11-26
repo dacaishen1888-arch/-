@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildChatMessages, callAiRaw, chatRequestBody, entriesFromPending, looksLikeApiKey, resolveTurn, scalePending, withBase, type PendingFood } from "../src/aiChat";
+import { pendingFromLabel } from "../src/commonFoods";
+import { buildChatMessages, callAiRaw, chatRequestBody, entriesFromPending, looksLikeApiKey, pendingFromHit, resolveTurn, scalePending, withBase, type PendingFood } from "../src/aiChat";
 
 const rice = (grams = 200, kcal = 232): PendingFood => withBase({ id: "rice", name: "米饭", grams, kcal, protein: 5.2, carbs: 52, fat: 0.6, meal: "午餐", source: "ai" });
 const egg = (): PendingFood => withBase({ id: "egg", name: "鸡蛋", grams: 100, kcal: 144, protein: 13, carbs: 1.5, fat: 9, meal: "午餐", source: "ai" });
@@ -47,11 +48,16 @@ describe("chat turns do not write food by themselves", () => {
     }), "2026-11-08");
     expect(added.pending.map((p) => p.name)).toEqual(["鸡蛋", "米饭"]);
   });
-  it("leaves the draft alone when the model response is garbage", () => {
+  it("uses the built-in table when the model response is garbage", () => {
     const prev = [rice()];
     const turn = resolveTurn(prev, "米饭200克", "not json", "2026-11-08");
-    expect(turn.error).toContain("无法解析");
-    expect(turn.pending).toBe(prev);
+    expect(turn.error).toBeUndefined();
+    expect(turn.pending).toHaveLength(1);
+    expect(turn.pending[0].grams).toBe(200);
+    expect(turn.pending[0].kcal).toBeCloseTo(232, 5);
+    const kept = resolveTurn(prev, "zzzz", "not json", "2026-11-08");
+    expect(kept.error).toContain("无法解析");
+    expect(kept.pending).toBe(prev);
   });
   it("commits the portion totals once, not a second per-100g conversion", () => {
     const items = [rice(), egg()];
@@ -118,6 +124,44 @@ describe("milk nutrition and stated grams", () => {
     expect(same.reply).not.toContain("请输入");
     expect(buildChatMessages([], [], "200ml").find((m) => m.role === "system")?.content).toContain("不要再追问");
     expect(buildChatMessages([], [], "200ml").find((m) => m.role === "system")?.content).toContain("4.184");
+  });
+  it("does not copy one food's per-100g block onto the other items", () => {
+    const turn = resolveTurn([], "米饭200克和鸡蛋", JSON.stringify({
+      intent: "record",
+      reply: "米饭每100g能量116kcal，蛋白2.6g，碳水25.9g，脂肪0.3g",
+      pending: [
+        { name: "米饭", grams: 200, kcal: 232, protein: 5.2, carbs: 51.8, fat: 0.6 },
+        { name: "鸡蛋", grams: 100, kcal: 0, protein: 0, carbs: 0, fat: 0 },
+      ],
+    }), "2026-11-12");
+    const riceItem = turn.pending.find((p) => p.name.includes("米饭"));
+    const eggItem = turn.pending.find((p) => p.name.includes("蛋"));
+    expect(riceItem?.grams).toBe(200);
+    expect(Math.round(riceItem?.kcal || 0)).toBe(232);
+    expect(eggItem?.grams).toBe(100);
+    expect(Math.round(eggItem?.kcal || 0)).toBe(144);
+    expect(eggItem?.protein).toBeGreaterThan(10);
+  });
+  it("understands everyday portions, typos, and a pasted label without a model", () => {
+    const meal = resolveTurn([], "午餐一碗饭、两个鸡旦、一掌肉", "not json", "2026-11-12");
+    expect(meal.error).toBeUndefined();
+    expect(meal.pending.map((p) => p.name)).toEqual(["米饭(熟)", "鸡蛋(整个)", "猪里脊(熟)"]);
+    expect(meal.pending.map((p) => p.grams)).toEqual([200, 100, 100]);
+    expect(Math.round(meal.pending[0].kcal)).toBe(232);
+    expect(Math.round(meal.pending[1].kcal)).toBe(144);
+    const whey = resolveTurn([], "一勺乳清", "not json", "2026-11-12");
+    expect(whey.pending[0]).toMatchObject({ grams: 30, kcal: 118, protein: 23.7, carbs: 1.7, fat: 1.7 });
+    const label = resolveTurn([], "九牛巴氏鲜奶\n营养成分表 每100g\n能量 266kJ\n蛋白质 3.0g\n脂肪 3.8g\n碳水化合物 4.4g\n200克", "not json", "2026-11-12");
+    expect(label.pending.some((p) => Math.round(p.kcal) === 127 && p.grams === 200)).toBe(true);
+    const scoop = pendingFromLabel("营养成分表\n每100克含量\n能量 1649千焦\n蛋白质 79.0克\n脂肪 5.6克\n碳水化合物 5.8克\n钠 470毫克\n每份30克", "");
+    expect(scoop.missing).toBe(false);
+    expect(scoop.grams).toBe(30);
+    expect(scoop.protein).toBeCloseTo(23.7, 5);
+    expect(scoop.kcal).toBeCloseTo(118.2, 0);
+    expect(scoop.reply).not.toContain("请输入");
+    const unread = pendingFromLabel("营养成分表模糊，能量和蛋白质都看不清", "");
+    expect(unread.missing).toBe(true);
+    expect(entriesFromPending([pendingFromHit(unread)], "午餐")).toEqual([]);
   });
 });
 
