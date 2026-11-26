@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
-import { addDays, analyzeDates, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, mondayOf, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weekDates, weeklyDeficit, migrateProteinTargets, weekBalance, weekday, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
+import { addDays, analyzeDates, analyzeWindow, bmrOf, calcTargets, dayDiff, entryFromFood, foodFromEntry, formatShanghai, isBaseFoodName, isTrain, lastNDays, mondayOf, movingAverage, needsTrainCarb, r0, streakCount, sumEntries, weekDates, weeklyDeficit, migrateProteinTargets, migrateWheySupplement, WHEY_DOSE, WHEY_SCOOP, weekBalance, weekday, PROFILE_DEFAULT, type Entry, type Food, type Profile } from "../src/logic";
 
 const profile: Profile = { h: "170", w: "82", age: "34", bf: "", act: "1.6", def: "18" };
 const e = (id: number, k: number, p: number, c = 0, f = 0, grams = 100): Entry => ({ id, meal: "午餐", name: "食物", grams, k, p, c, f });
@@ -401,8 +401,27 @@ describe("natural week", () => {
   });
 });
 
+describe("v46 whey scoop migration", () => {
+  const creat = { n: "肌酸 5g", dose: "", k: 0, p: 0, c: 0, f: 0 };
+  it("replaces either old default and leaves a custom scoop alone", () => {
+    const old = migrateWheySupplement([
+      { n: "乳清蛋白", dose: "1勺", k: 150, p: 30, c: 4, f: 2 },
+      creat,
+    ]);
+    expect(old[0]).toMatchObject({ n: "乳清蛋白", dose: WHEY_DOSE, ...WHEY_SCOOP });
+    expect(old[1]).toEqual(creat);
+    const mid = migrateWheySupplement([{ n: "乳清蛋白", dose: "睡前", k: 150, p: 30, c: 2.2, f: 2.1 }]);
+    expect(mid[0]).toMatchObject({ dose: "睡前", ...WHEY_SCOOP });
+    const custom = migrateWheySupplement([{ n: "乳清蛋白", dose: "1勺", k: 160, p: 30, c: 4, f: 2 }]);
+    expect(custom[0]).toMatchObject({ k: 160, p: 30, c: 4, f: 2, dose: "1勺" });
+    const renamed = migrateWheySupplement([{ n: "乳清蛋白(按勺)", dose: "1勺", k: 150, p: 30, c: 4, f: 2 }]);
+    expect(renamed[0].k).toBe(150);
+    expect(WHEY_SCOOP).toEqual({ k: 118, p: 23.7, c: 1.7, f: 1.7 });
+  });
+});
+
 describe("service worker", () => {
-  it("bumps the cache to ct-v45", () => {
-    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v45"');
+  it("bumps the cache to ct-v46", () => {
+    expect(readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8")).toContain('const C = "ct-v46"');
   });
 });

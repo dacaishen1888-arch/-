@@ -132,6 +132,32 @@ export function migrateProteinTargets(pr: Profile): Profile {
   return next;
 }
 
+export const WHEY_SCOOP = { k: 118, p: 23.7, c: 1.7, f: 1.7 };
+export const WHEY_DOSE = "1勺=30g粉";
+export const WHEY_NOTE = "1勺=30g粉，118kcal、蛋白23.7g、碳水1.7g、脂肪1.7g";
+
+const WHEY_LEGACY = [
+  { k: 150, p: 30, c: 4, f: 2 },
+  { k: 150, p: 30, c: 2.2, f: 2.1 },
+];
+
+function nearNum(a: number, b: number): boolean {
+  const x = Number(a);
+  const y = Number(b);
+  return Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) < 1e-6;
+}
+
+export function migrateWheySupplement<T extends { n: string; dose?: string; k: number; p: number; c: number; f: number }>(list: T[]): T[] {
+  return list.map((it) => {
+    if (!it || String(it.n || "").trim() !== "乳清蛋白") return it;
+    const legacy = WHEY_LEGACY.some((old) => nearNum(it.k, old.k) && nearNum(it.p, old.p) && nearNum(it.c, old.c) && nearNum(it.f, old.f));
+    if (!legacy) return it;
+    const next = { ...it, ...WHEY_SCOOP };
+    if (it.dose === "1勺") next.dose = WHEY_DOSE;
+    return next;
+  });
+}
+
 export function weeklyDeficit(pr: Profile): number {
   const b = bmrOf(pr).bmr;
   const act = parseFloat(pr.act) || 1.55;

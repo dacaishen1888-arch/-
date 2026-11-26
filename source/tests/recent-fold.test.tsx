@@ -42,7 +42,7 @@ describe("最近添加", () => {
     expect(screen.getByText(/每100g 160kcal/)).toBeTruthy();
     fireEvent.change(input, { target: { value: "乳清蛋白(按勺) 1勺" } });
     expect(screen.getAllByText(/乳清蛋白\(按勺\)/)).toHaveLength(1);
-    expect(screen.getByText(/每勺 150kcal/)).toBeTruthy();
+    expect(screen.getByText(/每勺 118kcal/)).toBeTruthy();
     fireEvent.change(input, { target: { value: "回填酸奶" } });
     expect(screen.getByText(/每100g 70kcal/)).toBeTruthy();
   });
